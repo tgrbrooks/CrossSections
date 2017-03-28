@@ -14,7 +14,53 @@
 
 #include "smearing.h"
 
-using namespace std; 
+using namespace std;
+
+double SmearKE(double ke){
+
+  // -------------------------------------------------------
+  //                      Kinetic energy  MAKE THIS A FUNCTION
+  // -------------------------------------------------------
+  // Calculate the mean and sigma for the LogNormal function
+  //      zeta  = TMath::Log( m * ( 1 / sqrt( 1 + ( var / pow( m, 2 ) ) ) ) );
+  //      sigma = sqrt( log( 1 + ( var / pow( m, 2 ) ) ) );
+  //      m     = expectation value = El - m_mu
+  //      var   = variance = s.d.^2 = ( El - m_mu * 0.1 ) ^ 2
+
+  // Initiate the random number generation
+  ROOT::Math::GSLRngMT *_random_gen = new ROOT::Math::GSLRngMT;
+  _random_gen->Initialize();    
+  _random_gen->SetSeed( time( NULL ) ); 
+
+  double var     = TMath::Power( ( ke ) * 0.1, 2 ); 
+  double sigma   = TMath::Sqrt( TMath::Log( 1 + ( var / TMath::Power( ( ke ), 2 ) ) ) );
+  double zeta    = TMath::Log( ( ke ) * ( 1 / TMath::Sqrt( 1 + ( var / TMath::Power( ( ke ), 2 ) ) ) ) );
+  double lognorm = _random_gen->LogNormal( zeta, sigma );
+
+  return lognorm;
+}
+
+double SmearCosTheta(double costheta){
+    
+  // -------------------------------------------------------
+  //                      Cos theta MAKE THIS A FUNCTION
+  // -------------------------------------------------------
+
+  // Calculate the mean and sigma for the LogNormal function
+  //      theta = acos(costtheta)
+  //      var   = 5 degrees
+
+  // Initiate the random number generation
+  ROOT::Math::GSLRngMT *_random_gen = new ROOT::Math::GSLRngMT;
+  _random_gen->Initialize();    
+  _random_gen->SetSeed( time( NULL ) ); 
+
+  double sd_theta = TMath::Pi() / 36; // 5 degrees
+  double gaus_theta = TMath::ACos( costheta ) + _random_gen->Gaussian( sd_theta );
+  double gaus_costheta = TMath::Cos( gaus_theta ); 
+
+  return gaus_costheta;
+}
 
 int smearing() {
 
@@ -102,14 +148,6 @@ void Smear ( TTree *tree,
              std::vector<TH2*> &v_sm,
              TFile *f ){
 
-    // Total momentum and angle distributions before smearing
-    TH1D *h_Tmu_un = new TH1D("h_Tmu_un","T_{#mu} before smearing",18,0,2);
-    TH1D *h_costhetamu_un = new TH1D("h_costheta_mu","cos(#theta_{#mu}) before smearing",20,-1,1);
-
-    // Total momentum and angle distributions after smearing
-    TH1D *h_Tmu_sm = new TH1D("h_Tmu_sm","T_{#mu} after smearing",18,0,2);
-    TH1D *h_costhetamu_sm = new TH1D("h_costheta_sm","cos(#theta_{#mu}) after smearing",20,-1,1);
-
     // Stacked unsmeared histogram
     THStack *hs_un = new THStack("hs_un","Stacked Histograms");
     TH2D *h_ccqe_un = new TH2D("h_ccqe_un","CCQE",20,-1,1,18,0,2);
@@ -124,18 +162,6 @@ void Smear ( TTree *tree,
     TH2D *h_ccdis_sm = new TH2D("h_ccdis_sm","CCDIS",20,-1,1,18,0,2);
     TH2D *h_cccoh_sm = new TH2D("h_cccoh_sm","CCCOH",20,-1,1,18,0,2);
     TH2D *h_nc_sm = new TH2D("h_nc_sm","NC1pi",20,-1,1,18,0,2);
-
-    ofstream file1;
-    file1.open("unsmeared_results.tex"); 
-    file1 << " \\begin{tabular}{ | * {20}{c} | } " << endl;
-    
-    ofstream file2;
-    file2.open("impure_smeared_results.tex"); 
-    file2 << " \\begin{tabular}{ | * {20}{c} | } " << endl;
-     
-    ofstream file3;
-    file3.open("impure_results_difference.tex"); 
-    file3 << " \\begin{tabular}{ | * {20}{c} | } " << endl;
 
     // Get the branches
     TBranch *b_nf    = tree->GetBranch( "nf" );
@@ -175,17 +201,17 @@ void Smear ( TTree *tree,
     int ccdis_count = 0;
     int cccoh_count = 0;
     int other2_count = 0;
-    int nc_count     = 0;
 
     // Vectors to fill for the impurity implementation
     vector< double > T_mu_vect;
     vector< double > T_pi_vect;
     vector< double > cos_pi_vect;
-    
-    vector< int > Impurity;
-   
-    // Counters to check what is going on
-    int nc_1pi_count      = 0;
+
+    // Vectors to hold the smeared values of T and cos theta
+    vector< double > T_mu_prime;
+    vector< double > cos_mu_prime;
+    vector< double > T_pi_prime;
+    vector< double > cos_pi_prime;
 
     // Loop over the entries of the tree and calculate the kinetic energies 
     // of the muons and pions and define the impurity
@@ -200,6 +226,7 @@ void Smear ( TTree *tree,
         int nfpim = b_nfpim->GetLeaf("nfpim")->GetValue();
         int fspl = b_fspl->GetLeaf("fspl")->GetValue();
         int nf   = b_nf->GetLeaf("nf")->GetValue();
+        int nc   = b_nc->GetLeaf("nc")->GetValue();
 
         // Calculate the kinetic energy for muons
         if ( fspl == 13 ){  
@@ -207,8 +234,12 @@ void Smear ( TTree *tree,
             // Energy of the final state primary lepton
             e_mu = b_El->GetLeaf("El")->GetValue();
             T_mu = e_mu - m_mu;
+            double cthl  = b_cthl->GetLeaf( "cthl" )->GetValue();
 
             T_mu_vect.push_back(T_mu);
+
+            T_mu_prime.push_back(SmearKE(T_mu));
+            cos_mu_prime.push_back(SmearCosTheta(cthl));
 
             muon_count++;
         }
@@ -216,15 +247,21 @@ void Smear ( TTree *tree,
         // be removed in the cuts later
         else if ( fspl == 11 ){
             T_mu_vect.push_back(-99999);
+            T_mu_prime.push_back(-99999);
+            cos_mu_prime.push_back(-99999);
             e_count++;
         }
         else{
             T_mu_vect.push_back(-99999);
+            T_mu_prime.push_back(-99999);
+            cos_mu_prime.push_back(-99999);
             other_count++;
         }
 
         // Calculate the kinetic energy of the pions
-        if ( nfpip + nfpim == 1 && nfpi0 == 0){ // Get rid of this for cc inclusive
+        if ( nc == 1 ){ 
+          double prev_e_pi = 0;
+          double prev_cos_pi = 0;
 
           //For all the final state hadronic particles, get their pdg code
           for (int j = 0; j<nf; ++j) {
@@ -237,96 +274,48 @@ void Smear ( TTree *tree,
             double e_pi = b_Ef->GetLeaf("Ef")->GetValue(j);
             double cos_pi = b_cthf->GetLeaf("cthf")->GetValue(j);
 
-            if (pdgf == 211 || pdgf == -211){// Could have more than 1 pion per event, so should this be a vector?
-
-              double T_pi = e_pi - m_pi;
-
-              T_pi_vect.push_back(T_pi);
-              cos_pi_vect.push_back(cos_pi);
-
-              pion_count++;   
+            if (pdgf == 211 || pdgf == -211){// for each pion 
+              int random;
+              random = rand() % 5 + 1;
+              if ( random == 5 && e_pi > prev_e_pi ) {
+                prev_e_pi = e_pi;
+                prev_cos_pi = cos_pi;
+              }
             }
+            // for each pion draw random number to decide if misidentified or not
+            // count number of pions, record energies
+          }
+          double T_pi = prev_e_pi - m_pi;
+
+          if( prev_e_pi != 0 ){
+            T_pi_vect.push_back(T_pi);
+            cos_pi_vect.push_back(prev_cos_pi);
+            T_pi_prime.push_back(SmearKE(T_pi));
+            cos_pi_prime.push_back(SmearCosTheta(prev_cos_pi));
+
+            pion_count++;
+          }
+          else{
+            T_pi_vect.push_back(-99999);
+            cos_pi_vect.push_back(-99999);
+            T_pi_prime.push_back(-99999);
+            cos_pi_prime.push_back(-99999);
           }
         }
         else{
             T_pi_vect.push_back(-99999);
             cos_pi_vect.push_back(-99999);
-        }
-
-        // Apply the impurity cut
-        if ( b_nc->GetLeaf("nc")->GetValue() != 0 && nfpip + nfpim == 1 && nfpi0 == 0){// get rid of pion requirement for cc inc 
-            int random;
-            random = rand() % 5 + 1;
-            nc_1pi_count++;
-
-            // If the random number = 5 then push back a 1 onto the vector
-            // If the random number < 5 push back a 0
-            if( random == 5 ){
-                Impurity.push_back(1);       
-            }
-            else{
-                Impurity.push_back(0);
-            }
-        }
-        else{
-            Impurity.push_back(0);
+            T_pi_prime.push_back(-99999);
+            cos_pi_prime.push_back(-99999);
         }
     }
-    std::cout<<"Number of muons = "<<muon_count<<endl<<"Number of electrons = "<<e_count<<endl<<"Number of pions = "<<pion_count<<endl<<"Number of others = "<<other_count<<endl<<"Number of NC1pi = "<<nc_1pi_count<<endl;
-    // Vectors to hold the smeared values of T and cos theta
-    vector< double > T_mu_prime;
-    vector< double > cos_mu_prime;
 
-    // Initiate the random number generation
-    ROOT::Math::GSLRngMT *_random_gen = new ROOT::Math::GSLRngMT;
-    _random_gen->Initialize();    
-    _random_gen->SetSeed( time( NULL ) ); 
-    
-    // Event by event, generate Tmu_prime and Tpi_prime: lognormal
-    // Then find thetamu_prime and thetapi_prime: gaussian
-    for ( int i = 0; i < n_values; ++i ){
+    std::cout<<"Number of muons = "<<muon_count<<endl
+            <<"Number of electrons = "<<e_count<<endl
+            <<"Number of misID pions = "<<pion_count<<endl
+            <<"Number of others = "<<other_count<<endl;
 
-        tree->GetEntry(i);
-
-        double El    = b_El->GetLeaf( "El" )->GetValue();
-        double cthl  = b_cthl->GetLeaf( "cthl" )->GetValue();
-
-        // -------------------------------------------------------
-        //                      Kinetic energy
-        // -------------------------------------------------------
-        // Calculate the mean and sigma for the LogNormal function
-        //      zeta  = TMath::Log( m * ( 1 / sqrt( 1 + ( var / pow( m, 2 ) ) ) ) );
-        //      sigma = sqrt( log( 1 + ( var / pow( m, 2 ) ) ) );
-        //      m     = expectation value = El - m_mu
-        //      var   = variance = s.d.^2 = ( El - m_mu * 0.1 ) ^ 2
-    
-        double var_mu     = TMath::Power( ( El - m_mu ) * 0.1, 2 ); 
-        double sigma_mu   = TMath::Sqrt( TMath::Log( 1 + ( var_mu / TMath::Power( ( El - m_mu ), 2 ) ) ) );
-        double zeta_mu    = TMath::Log( ( El - m_mu ) * ( 1 / TMath::Sqrt( 1 + ( var_mu / TMath::Power( ( El - m_mu ), 2 ) ) ) ) );
-        double lognorm_mu = _random_gen->LogNormal( zeta_mu, sigma_mu );
-
-        T_mu_prime.push_back(lognorm_mu);
-            
-        // -------------------------------------------------------
-        //                      Cos theta
-        // -------------------------------------------------------
-        
-        // Calculate the mean and sigma for the LogNormal function
-        //      theta = acos(costtheta)
-        //      var   = 5 degrees
-    
-        double sd_thetamu = TMath::Pi() / 36; // 5 degrees
-        double gaus_theta = TMath::ACos( cthl ) + _random_gen->Gaussian( sd_thetamu );
-        double gaus_costheta = TMath::Cos( gaus_theta ); 
-
-        cos_mu_prime.push_back(gaus_costheta);
-
-    } 
-
-    // Implement the smearing factors and plot the histograms both before and after to observe the effect
-    // Let's start with Gaussian smearing for now and move onto log normal smearing later
     // Now try the smearing
-    TCanvas *c2 = new TCanvas("c2","",1000,800);
 
     int ccinc_count = 0;
     int imp_count = 0;
@@ -371,24 +360,27 @@ void Smear ( TTree *tree,
             else if ( dis == 1 ) { h_ccdis_sm->Fill(cos_mu_prime[i],T_mu_prime[i]); }
             else if ( coh == 1 ) { h_cccoh_sm->Fill(cos_mu_prime[i],T_mu_prime[i]); }
 
-            h_Tmu_un->Fill(T_mu_vect[i]);
-            h_Tmu_sm->Fill(T_mu_prime[i]);
-            h_costhetamu_un->Fill(cthl);
-            h_costhetamu_sm->Fill(cos_mu_prime[i]);
+            h_unsmeared->Fill(cthl, T_mu_vect[i]);
             h_smeared->Fill(cos_mu_prime[i], T_mu_prime[i]);
             ccinc_count++;
         }
-        else if ( Impurity[i] == 1 
-            && T_pi_vect[i] > 0.05 ){
+        else if ( T_pi_prime[i] > 0 ){
 
-            h_nc_sm->Fill(cos_pi_vect[i], T_pi_vect[i]);
-            h_smeared->Fill(cos_pi_vect[i], T_pi_vect[i]);
+            h_nc_sm->Fill(cos_pi_prime[i], T_pi_prime[i]);
+            h_smeared->Fill(cos_pi_prime[i], T_pi_prime[i]);
             imp_count++;
-            nc_count++;
         }
     }
-    std::cout<<"Number of true CC events = "<<ccinc_count<<endl<<"Number of impurity events = "<<imp_count<<endl;
-    std::cout<<endl<<"Signal event types:"<<endl<<"Number of CCQE = "<<ccqe_count<<endl<<"Number of CCRES = "<<ccres_count<<endl<<"Number of CCDIS = "<<ccdis_count<<endl<<"Number of CCCOH = "<<cccoh_count<<endl<<"Number of others = "<<other2_count<<endl;
+
+    std::cout<<endl<<"Number of true CC events = "<<ccinc_count
+             <<endl<<"Number of impurity events = "<<imp_count<<endl;
+
+    std::cout<<endl<<"Signal event types:"<<endl
+             <<"Number of CCQE = "<<ccqe_count<<endl
+             <<"Number of CCRES = "<<ccres_count
+             <<endl<<"Number of CCDIS = "<<ccdis_count
+             <<endl<<"Number of CCCOH = "<<cccoh_count
+             <<endl<<"Number of others = "<<other2_count<<endl;
 
     h_cccoh_un->SetFillColor(kMagenta+2);
     h_ccdis_un->SetFillColor(kBlue-4);
@@ -432,54 +424,13 @@ void Smear ( TTree *tree,
     v_sm.push_back(h_ccres_sm);
     v_sm.push_back(h_ccqe_sm);
 
-    double nX = h_smeared->GetNbinsX();
-    double nY = h_smeared->GetNbinsY();
- 
-    // Write the bin contents to .tex files
-    for ( int i = nY; i >= 1; --i){
-        for ( int j = 1; j <= nX - 1; ++j ){
-            
-            file1 << h_unsmeared->GetBinContent(j,i) << " & ";
-            file2 << h_smeared->GetBinContent(j,i) << " & "; 
-            file3 << ( h_smeared->GetBinContent(j,i) - h_unsmeared->GetBinContent(j,i) ) << " & ";
-        }
-
-        file1 << h_unsmeared->GetBinContent(nX, i) << " \\\\ " << endl;
-        file2 << h_smeared->GetBinContent(nX, i) << " \\\\ " << endl;
-        file3 << ( h_smeared->GetBinContent(nX, i) - h_unsmeared->GetBinContent(nX, i) ) << " \\\\ " << endl;
-        
-    }
-    file1 << " \\end{tabular} " << endl;
-    file2 << " \\end{tabular} " << endl;
-    file3 << " \\end{tabular} " << endl;
-
     f->cd();
-
-    c2->SetRightMargin(0.13);
     
     h_smeared->Draw("colz");
     h_smeared->SetStats(kFALSE);
     h_smeared->GetXaxis()->SetTitle("cos#theta_{#mu}");
     h_smeared->GetYaxis()->SetTitle("T_{#mu}");
-    //c2->SetLogz();
-    c2->SaveAs("distribution_after_impure.png");
-    //c2->SaveAs("distribution_after_log_impure.png");
-
-    h_Tmu_un->Draw();
-    h_Tmu_un->GetXaxis()->SetTitle("T_{#mu}");
-    h_Tmu_un->Write("Tmu_before_smearing");
-
-    h_Tmu_sm->Draw();
-    h_Tmu_sm->GetXaxis()->SetTitle("T_{#mu}");
-    h_Tmu_sm->Write("Tmu_after_smearing");
-
-    h_costhetamu_un->Draw();
-    h_costhetamu_un->GetXaxis()->SetTitle("cos#theta_{#mu}");
-    h_costhetamu_un->Write("costhetamu_before_smearing");
-
-    h_costhetamu_sm->Draw();
-    h_costhetamu_sm->GetXaxis()->SetTitle("cos#theta_{#mu}");
-    h_costhetamu_sm->Write("costhetamu_after_smearing");
+    h_smeared->Write("distribution_after_impure");
 
     hs_un->Draw();
     leg->Draw("same");
@@ -696,7 +647,7 @@ void SliceStack ( std::vector<TH2*> v_un, std::vector<TH2*> v_sm, TFile *f ){
       string title;
       title.clear();
 
-      conv << setprecision(4) << "Tmu_un_cosmu:" << v_un[0]->GetXaxis()->GetBinLowEdge(j) << ";" << v_un[0]->GetXaxis()->GetBinLowEdge(j+1);;
+      conv << setprecision(4) << "un_Tmu_cosmuRange:" << v_un[0]->GetXaxis()->GetBinLowEdge(j) << ";" << v_un[0]->GetXaxis()->GetBinLowEdge(j+1);;
       title = conv.str();
 
       // Make the title for the current histogram and the file name
@@ -707,7 +658,7 @@ void SliceStack ( std::vector<TH2*> v_un, std::vector<TH2*> v_sm, TFile *f ){
       string title2;
       title2.clear();
 
-      conv2 << setprecision(4) << "Tmu_sm_cosmu:" << v_sm[0]->GetXaxis()->GetBinLowEdge(j) << ";" << v_sm[0]->GetXaxis()->GetBinLowEdge(j+1);;
+      conv2 << setprecision(4) << "sm_Tmu_cosmuRange:" << v_sm[0]->GetXaxis()->GetBinLowEdge(j) << ";" << v_sm[0]->GetXaxis()->GetBinLowEdge(j+1);;
       title2 = conv2.str();
 
       THStack *hs_Tmu_un_tmp = new THStack("hs_tmu_un_tmp","");
@@ -738,7 +689,7 @@ void SliceStack ( std::vector<TH2*> v_un, std::vector<TH2*> v_sm, TFile *f ){
       string title;
       title.clear();
 
-      conv << setprecision(4) << "cosmu_un_Tmu:" << v_un[0]->GetYaxis()->GetBinLowEdge(j) << ";" << v_un[0]->GetYaxis()->GetBinLowEdge(j+1);;
+      conv << setprecision(4) << "un_cosmu_TmuRange:" << v_un[0]->GetYaxis()->GetBinLowEdge(j) << ";" << v_un[0]->GetYaxis()->GetBinLowEdge(j+1);;
       title = conv.str();
 
       // Make the title for the current histogram and the file name
@@ -749,7 +700,7 @@ void SliceStack ( std::vector<TH2*> v_un, std::vector<TH2*> v_sm, TFile *f ){
       string title2;
       title2.clear();
 
-      conv2 << setprecision(4) << "cosmu_sm_Tmu:" << v_sm[0]->GetYaxis()->GetBinLowEdge(j) << ";" << v_sm[0]->GetYaxis()->GetBinLowEdge(j+1);;
+      conv2 << setprecision(4) << "sm_cosmu_TmuRange:" << v_sm[0]->GetYaxis()->GetBinLowEdge(j) << ";" << v_sm[0]->GetYaxis()->GetBinLowEdge(j+1);;
       title2 = conv2.str();
 
       THStack *hs_cosmu_un_tmp = new THStack("hs_cosmu_un_tmp","");
@@ -769,6 +720,5 @@ void SliceStack ( std::vector<TH2*> v_un, std::vector<TH2*> v_sm, TFile *f ){
       delete hs_cosmu_sm_tmp;
 
     }
-
     
 }
