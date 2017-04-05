@@ -16,21 +16,16 @@
 
 using namespace std;
 
-double SmearKE(double ke){
+double SmearKE(double ke, ROOT::Math::GSLRngMT *_random_gen){
 
   // -------------------------------------------------------
-  //                      Kinetic energy  MAKE THIS A FUNCTION
+  //                      Kinetic energy
   // -------------------------------------------------------
   // Calculate the mean and sigma for the LogNormal function
   //      zeta  = TMath::Log( m * ( 1 / sqrt( 1 + ( var / pow( m, 2 ) ) ) ) );
   //      sigma = sqrt( log( 1 + ( var / pow( m, 2 ) ) ) );
   //      m     = expectation value = El - m_mu
   //      var   = variance = s.d.^2 = ( El - m_mu * 0.1 ) ^ 2
-
-  // Initiate the random number generation
-  ROOT::Math::GSLRngMT *_random_gen = new ROOT::Math::GSLRngMT;
-  _random_gen->Initialize();    
-  _random_gen->SetSeed( time( NULL ) ); 
 
   double var     = TMath::Power( ( ke ) * 0.1, 2 ); 
   double sigma   = TMath::Sqrt( TMath::Log( 1 + ( var / TMath::Power( ( ke ), 2 ) ) ) );
@@ -40,20 +35,15 @@ double SmearKE(double ke){
   return lognorm;
 }
 
-double SmearCosTheta(double costheta){
+double SmearCosTheta(double costheta, ROOT::Math::GSLRngMT *_random_gen){
     
   // -------------------------------------------------------
-  //                      Cos theta MAKE THIS A FUNCTION
+  //                      Cos theta
   // -------------------------------------------------------
 
   // Calculate the mean and sigma for the LogNormal function
   //      theta = acos(costtheta)
   //      var   = 5 degrees
-
-  // Initiate the random number generation
-  ROOT::Math::GSLRngMT *_random_gen = new ROOT::Math::GSLRngMT;
-  _random_gen->Initialize();    
-  _random_gen->SetSeed( time( NULL ) ); 
 
   double sd_theta = TMath::Pi() / 36; // 5 degrees
   double gaus_theta = TMath::ACos( costheta ) + _random_gen->Gaussian( sd_theta );
@@ -110,7 +100,6 @@ int smearing() {
     TH2D *h_un = new TH2D("h_un"," T_{#mu} - cos#theta_{#mu} distribution before smearing ",20,-1,1,18,0,2);
     def_tree->Draw("( El - 0.10566 ):cthl>>h_un","fspl == 13 && cc","colz"); 
 
-    h_un->SetStats(kFALSE);
     h_un->GetXaxis()->SetTitle("cos#theta_{#mu}");
     h_un->GetYaxis()->SetTitle("T_{#mu}");
     h_un->Write("distribution_before");
@@ -122,12 +111,39 @@ int smearing() {
     TH2D *h_sm = new TH2D("h_sm"," T_{#mu} - cos#theta_{#mu} distribution after smearing, impurity ",20,-1,1,18,0,2);
     
     // Take h_un and smear it
-    Smear(def_tree, h_un, h_sm, v_un, v_sm, f);
+    Smear(def_tree, h_sm, v_un, v_sm, f);
 
     // The the 2 2D histograms and draw slices in Tmu and cos theta mu
     Slices( h_un, h_sm );
 
     SliceStack( v_un, v_sm, f );
+
+    TH2D *h_eff = new TH2D("h_eff","h_eff;cos#theta_{#mu};T_{#mu}",20,-1,1,18,0,2);
+    TH2D *h_pur = new TH2D("h_pur","h_pur;cos#theta_{#mu};T_{#mu}",20,-1,1,18,0,2);
+    TH2D *h_effpur = new TH2D("h_effpur","h_effpur;cos#theta_{#mu};T_{#mu}",20,-1,1,18,0,2);
+    TH2D *h_impur = new TH2D("h_impur","h_impur;cos#theta_{#mu};T_{#mu}",20,-1,1,18,0,2);
+
+    //Fill efficiency histogram with Nsig/Nmcsig
+    h_eff->Add(h_sm,v_sm[0],1.,-1.);
+    h_eff->Divide(h_un);
+    //Fill purity histogram with Nsig/(Nsig+Nbkg)
+    h_pur->Add(h_sm,v_sm[0],1.,-1.);
+    h_pur->Divide(h_sm);
+    //Fill efficiency*purity histogram with h_eff*h_pur
+    h_effpur->Multiply(h_eff,h_pur,1.,1.);
+    //Fill impurity histogram with Nbkg/(Nsig+Nbkg)
+    h_impur->Divide(v_sm[0],h_sm,1.,1.);
+
+    h_eff->SetMinimum(0.5);
+    h_eff->SetMaximum(1.0);
+    h_eff->Write("h_eff");
+    h_pur->SetMinimum(0.7);
+    h_pur->SetMaximum(1.0);
+    h_pur->Write("h_pur");
+    h_effpur->SetMinimum(0.5);
+    h_effpur->SetMaximum(1.0);
+    h_effpur->Write("h_effpur");
+    h_impur->Write("h_impur");
 
     f->Close();
 
@@ -142,7 +158,6 @@ int smearing() {
 // -------------------------------------------------------------------------
 
 void Smear ( TTree *tree, 
-             TH2D  *h_unsmeared,
              TH2D  *h_smeared, 
              std::vector<TH2*> &v_un,
              std::vector<TH2*> &v_sm,
@@ -161,7 +176,7 @@ void Smear ( TTree *tree,
     TH2D *h_ccres_sm = new TH2D("h_ccres_sm","CCRES",20,-1,1,18,0,2);
     TH2D *h_ccdis_sm = new TH2D("h_ccdis_sm","CCDIS",20,-1,1,18,0,2);
     TH2D *h_cccoh_sm = new TH2D("h_cccoh_sm","CCCOH",20,-1,1,18,0,2);
-    TH2D *h_nc_sm = new TH2D("h_nc_sm","NC1pi",20,-1,1,18,0,2);
+    TH2D *h_nc_sm = new TH2D("h_nc_sm","NCnpi",20,-1,1,18,0,2);
 
     // Get the branches
     TBranch *b_nf    = tree->GetBranch( "nf" );
@@ -188,30 +203,24 @@ void Smear ( TTree *tree,
    
     double m_mu = 0.10566; // Muon mass, GeV
     double m_pi = 0.13957; // Charged pion mass, GeV
-    
-    // Initiate some counters for when things went wrong
-    int e_count     = 0;
-    int other_count = 0;
-    int pion_count  = 0;
-    int muon_count  = 0;
 
     // Counters for different types of neutrino interaction
-    int ccqe_count = 0;
-    int ccres_count = 0;
-    int ccdis_count = 0;
-    int cccoh_count = 0;
-    int other2_count = 0;
+    int ccqe_count_un = 0; int ccqe_count_sm = 0;
+    int ccres_count_un = 0; int ccres_count_sm = 0;
+    int ccdis_count_un = 0; int ccdis_count_sm = 0;
+    int cccoh_count_un = 0; int cccoh_count_sm = 0;
+    int other_count_un = 0; int other_count_sm = 0;
 
-    // Vectors to fill for the impurity implementation
-    vector< double > T_mu_vect;
-    vector< double > T_pi_vect;
-    vector< double > cos_pi_vect;
+    // Total counters
+    int ccinc_count_un = 0;
+    int ccinc_count_sm = 0;
+    int imp_count = 0;
+    int nc_npi_count = 0;
 
-    // Vectors to hold the smeared values of T and cos theta
-    vector< double > T_mu_prime;
-    vector< double > cos_mu_prime;
-    vector< double > T_pi_prime;
-    vector< double > cos_pi_prime;
+    // Initiate the random number generation
+    ROOT::Math::GSLRngMT *_random_gen = new ROOT::Math::GSLRngMT;
+    _random_gen->Initialize();    
+    _random_gen->SetSeed( time( NULL ) ); 
 
     // Loop over the entries of the tree and calculate the kinetic energies 
     // of the muons and pions and define the impurity
@@ -221,49 +230,61 @@ void Smear ( TTree *tree,
      
         double T_mu, e_mu;
 
-        int nfpi0 = b_nfpi0->GetLeaf("nfpi0")->GetValue();
-        int nfpip = b_nfpip->GetLeaf("nfpip")->GetValue();
-        int nfpim = b_nfpim->GetLeaf("nfpim")->GetValue();
-        int fspl = b_fspl->GetLeaf("fspl")->GetValue();
+        // Get values from the branches
         int nf   = b_nf->GetLeaf("nf")->GetValue();
-        int nc   = b_nc->GetLeaf("nc")->GetValue();
+        double fspl  = b_fspl->GetLeaf( "fspl" )->GetValue(); 
+        double cc    = b_cc->GetLeaf( "cc" )->GetValue(); 
+        double nc    = b_nc->GetLeaf( "nc" )->GetValue(); 
+        double nfpip = b_nfpip->GetLeaf( "nfpip" )->GetValue();
+        double nfpim = b_nfpim->GetLeaf( "nfpim" )->GetValue();
+        double nfpi0 = b_nfpi0->GetLeaf( "nfpi0" )->GetValue();
+        double El    = b_El->GetLeaf( "El" )->GetValue();
+        double pl    = b_pl->GetLeaf( "pl" )->GetValue();
+        double cthl  = b_cthl->GetLeaf( "cthl" )->GetValue();
+        double qel   = b_qel->GetLeaf( "qel" )->GetValue();
+        double res   = b_res->GetLeaf( "res" )->GetValue();
+        double dis   = b_dis->GetLeaf( "dis" )->GetValue();
+        double coh   = b_coh->GetLeaf( "coh" )->GetValue();
 
-        // Calculate the kinetic energy for muons
-        if ( fspl == 13 ){  
-         
-            // Energy of the final state primary lepton
-            e_mu = b_El->GetLeaf("El")->GetValue();
-            T_mu = e_mu - m_mu;
-            double cthl  = b_cthl->GetLeaf( "cthl" )->GetValue();
+        // Kinetic energy of the final state primary lepton
+        T_mu = El - m_mu;
 
-            T_mu_vect.push_back(T_mu);
+        //Count the CC numu event types before smearing
+        if ( fspl == 13 && cc == 1 ) {
 
-            T_mu_prime.push_back(SmearKE(T_mu));
-            cos_mu_prime.push_back(SmearCosTheta(cthl));
+          if ( qel == 1 ) { h_ccqe_un->Fill(cthl,T_mu); ccqe_count_un++; }
+          else if ( res == 1 ) { h_ccres_un->Fill(cthl,T_mu); ccres_count_un++; }
+          else if ( dis == 1 ) { h_ccdis_un->Fill(cthl,T_mu); ccdis_count_un++; }
+          else if ( coh == 1 ) { h_cccoh_un->Fill(cthl,T_mu); cccoh_count_un++; }
+          else { other_count_un++; }
 
-            muon_count++;
-        }
-        // If the final state primary is a lepton, push back a number that will
-        // be removed in the cuts later
-        else if ( fspl == 11 ){
-            T_mu_vect.push_back(-99999);
-            T_mu_prime.push_back(-99999);
-            cos_mu_prime.push_back(-99999);
-            e_count++;
-        }
-        else{
-            T_mu_vect.push_back(-99999);
-            T_mu_prime.push_back(-99999);
-            cos_mu_prime.push_back(-99999);
-            other_count++;
+          ccinc_count_un++;
         }
 
-        // Calculate the kinetic energy of the pions
+        //Count the CC numu event types after smearing
+        if ( fspl == 13 && cc == 1  && T_mu > 0.05 ){
+
+          //Smear the muon energy and angle
+          if ( qel == 1 ) { h_ccqe_sm->Fill(SmearCosTheta(cthl,_random_gen),SmearKE(T_mu,_random_gen)); ccqe_count_sm++; }
+          else if ( res == 1 ) { h_ccres_sm->Fill(SmearCosTheta(cthl,_random_gen),SmearKE(T_mu,_random_gen)); ccres_count_sm++; }
+          else if ( dis == 1 ) { h_ccdis_sm->Fill(SmearCosTheta(cthl,_random_gen),SmearKE(T_mu,_random_gen)); ccdis_count_sm++; }
+          else if ( coh == 1 ) { h_cccoh_sm->Fill(SmearCosTheta(cthl,_random_gen),SmearKE(T_mu,_random_gen)); cccoh_count_sm++; }
+          else { other_count_sm++; }
+
+          h_smeared->Fill(SmearCosTheta(cthl,_random_gen),SmearKE(T_mu,_random_gen));
+          ccinc_count_sm++;
+
+        }
+
+        // Find NCnpi events
         if ( nc == 1 ){ 
+          // Count total number
+          if ( nfpip + nfpip > 0 ) nc_npi_count++;
+
           double prev_e_pi = 0;
           double prev_cos_pi = 0;
 
-          //For all the final state hadronic particles, get their pdg code
+          //Loop over all the final state hadronic particles
           for (int j = 0; j<nf; ++j) {
 
             b_pdgf->GetEntry(i);
@@ -274,150 +295,52 @@ void Smear ( TTree *tree,
             double e_pi = b_Ef->GetLeaf("Ef")->GetValue(j);
             double cos_pi = b_cthf->GetLeaf("cthf")->GetValue(j);
 
-            if (pdgf == 211 || pdgf == -211){// for each pion 
+            // If one of the hadrons is a pion use a random number to check if it is misidentified
+            if (pdgf == 211 || pdgf == -211){
               int random;
               random = rand() % 5 + 1;
+              // If more than one is misidentified assume the higher energy one is muon
               if ( random == 5 && e_pi > prev_e_pi ) {
                 prev_e_pi = e_pi;
                 prev_cos_pi = cos_pi;
               }
             }
-            // for each pion draw random number to decide if misidentified or not
-            // count number of pions, record energies
           }
+          //Kinetic energy
           double T_pi = prev_e_pi - m_pi;
-
-          if( prev_e_pi != 0 ){
-            T_pi_vect.push_back(T_pi);
-            cos_pi_vect.push_back(prev_cos_pi);
-            T_pi_prime.push_back(SmearKE(T_pi));
-            cos_pi_prime.push_back(SmearCosTheta(prev_cos_pi));
-
-            pion_count++;
-          }
-          else{
-            T_pi_vect.push_back(-99999);
-            cos_pi_vect.push_back(-99999);
-            T_pi_prime.push_back(-99999);
-            cos_pi_prime.push_back(-99999);
-          }
-        }
-        else{
-            T_pi_vect.push_back(-99999);
-            cos_pi_vect.push_back(-99999);
-            T_pi_prime.push_back(-99999);
-            cos_pi_prime.push_back(-99999);
-        }
-    }
-
-    std::cout<<"Number of muons = "<<muon_count<<endl
-            <<"Number of electrons = "<<e_count<<endl
-            <<"Number of misID pions = "<<pion_count<<endl
-            <<"Number of others = "<<other_count<<endl;
-
-    // Now try the smearing
-
-    int ccinc_count = 0;
-    int imp_count = 0;
-
-    // Fill h_smeared normally and with the impurities and THEN clone it
-    for ( int i = 0; i < n_values; ++i ){        
-        tree->GetEntry(i);
-
-        double fspl  = b_fspl->GetLeaf( "fspl" )->GetValue(); 
-        double pdgf  = b_pdgf->GetLeaf( "pdgf" )->GetValue(); 
-        double cc    = b_cc->GetLeaf( "cc" )->GetValue(); 
-        double nc    = b_nc->GetLeaf( "nc" )->GetValue(); 
-        double nfpip = b_nfpip->GetLeaf( "nfpip" )->GetValue();
-        double nfpim = b_nfpim->GetLeaf( "nfpim" )->GetValue();
-        double nfpi0 = b_nfpi0->GetLeaf( "nfpi0" )->GetValue();
-        double Ef    = b_Ef->GetLeaf( "Ef" )->GetValue();
-        double pf    = b_pf->GetLeaf( "pf" )->GetValue();
-        double cthf  = b_cthf->GetLeaf( "cthf" )->GetValue();
-        double El    = b_El->GetLeaf( "El" )->GetValue();
-        double pl    = b_pl->GetLeaf( "pl" )->GetValue();
-        double cthl  = b_cthl->GetLeaf( "cthl" )->GetValue();
-        double qel   = b_qel->GetLeaf( "qel" )->GetValue();
-        double res   = b_res->GetLeaf( "res" )->GetValue();
-        double dis   = b_dis->GetLeaf( "dis" )->GetValue();
-        double coh   = b_coh->GetLeaf( "coh" )->GetValue();
-
-        //Count the event types
-        if ( fspl == 13 && cc == 1 ) {
-          if ( qel == 1 ) { h_ccqe_un->Fill(cthl,T_mu_vect[i]); ccqe_count++; }
-          else if ( res == 1 ) { h_ccres_un->Fill(cthl,T_mu_vect[i]); ccres_count++; }
-          else if ( dis == 1 ) { h_ccdis_un->Fill(cthl,T_mu_vect[i]); ccdis_count++; }
-          else if ( coh == 1 ) { h_cccoh_un->Fill(cthl,T_mu_vect[i]); cccoh_count++; }
-          else { other2_count++;}
-        }
-        // Set the energy and impurity cuts
-        if ( fspl == 13 
-            && cc != 0  
-            && T_mu_vect[i] > 0.05 ){
-
-            if ( qel == 1 ) { h_ccqe_sm->Fill(cos_mu_prime[i],T_mu_prime[i]); }
-            else if ( res == 1 ) { h_ccres_sm->Fill(cos_mu_prime[i],T_mu_prime[i]); }
-            else if ( dis == 1 ) { h_ccdis_sm->Fill(cos_mu_prime[i],T_mu_prime[i]); }
-            else if ( coh == 1 ) { h_cccoh_sm->Fill(cos_mu_prime[i],T_mu_prime[i]); }
-
-            h_unsmeared->Fill(cthl, T_mu_vect[i]);
-            h_smeared->Fill(cos_mu_prime[i], T_mu_prime[i]);
-            ccinc_count++;
-        }
-        else if ( T_pi_prime[i] > 0 ){
-
-            h_nc_sm->Fill(cos_pi_prime[i], T_pi_prime[i]);
-            h_smeared->Fill(cos_pi_prime[i], T_pi_prime[i]);
+          // If at least one pion is misidentified and it has a high enough energy to be detected record it as a muon
+          if( prev_e_pi != 0 && T_pi > 0.05){
+            //Smear the pion energy and angle
+            h_nc_sm->Fill(SmearCosTheta(prev_cos_pi,_random_gen), SmearKE(T_pi,_random_gen));
+            h_smeared->Fill(SmearCosTheta(prev_cos_pi,_random_gen), SmearKE(T_pi,_random_gen));
             imp_count++;
+          }
         }
     }
+     
+    //Output the total numbers of events before and after smearing
+    cout<<" ---------------------------------------------------------- "<<endl
+        <<"| Before Smearing        "          <<" | After Smearing          "          <<"       |"<<endl
+        <<"|----------------------------------------------------------|"<<endl
+        <<"| Total CCInc =    "<<setfill(' ')<<setw(6)<<ccinc_count_un<<" | Total CCInc =           "<<ccinc_count_sm<<" |"<<endl
+        <<"| Total NCnpi+/- = "<<setfill(' ')<<setw(6)<<nc_npi_count  <<" | Total Impurity events = "<<setfill(' ')<<setw(6)<<imp_count     <<" |"<<endl
+        <<"|----------------------------------------------------------|"<<endl
+        <<"|----------------- Signal Event Types: --------------------|"<<endl
+        <<"|----------------------------------------------------------|"<<endl
+        <<"| CCQE =           "<<setfill(' ')<<setw(6)<<ccqe_count_un <<" | CCQE =                  "<<setfill(' ')<<setw(6)<<ccqe_count_sm <<" |"<<endl
+        <<"| CCRES =          "<<setfill(' ')<<setw(6)<<ccres_count_un<<" | CCRES =                 "<<setfill(' ')<<setw(6)<<ccres_count_sm<<" |"<<endl
+        <<"| CCDIS =          "<<setfill(' ')<<setw(6)<<ccdis_count_un<<" | CCDIS =                 "<<setfill(' ')<<setw(6)<<ccdis_count_sm<<" |"<<endl
+        <<"| CCCOH =          "<<setfill(' ')<<setw(6)<<cccoh_count_un<<" | CCCOH =                 "<<setfill(' ')<<setw(6)<<cccoh_count_sm<<" |"<<endl
+        <<"| Others =         "<<setfill(' ')<<setw(6)<<other_count_un<<" | Others =                "<<setfill(' ')<<setw(6)<<other_count_sm<<" |"<<endl
+        <<" ---------------------------------------------------------- "<<endl;
 
-    std::cout<<endl<<"Number of true CC events = "<<ccinc_count
-             <<endl<<"Number of impurity events = "<<imp_count<<endl;
-
-    std::cout<<endl<<"Signal event types:"<<endl
-             <<"Number of CCQE = "<<ccqe_count<<endl
-             <<"Number of CCRES = "<<ccres_count
-             <<endl<<"Number of CCDIS = "<<ccdis_count
-             <<endl<<"Number of CCCOH = "<<cccoh_count
-             <<endl<<"Number of others = "<<other2_count<<endl;
-
-    h_cccoh_un->SetFillColor(kMagenta+2);
-    h_ccdis_un->SetFillColor(kBlue-4);
-    h_ccres_un->SetFillColor(kGreen-4);
-    h_ccqe_un->SetFillColor(kRed-4);
-    TLegend *leg = new TLegend(0.2,0.8,0.4,0.4);
-    leg->AddEntry(h_cccoh_un,"CCCOH","f");
-    leg->AddEntry(h_ccdis_un,"CCDIS","f");
-    leg->AddEntry(h_ccres_un,"CCRES","f");
-    leg->AddEntry(h_ccqe_un,"CCQE","f");
-    hs_un->Add(h_cccoh_un);
-    hs_un->Add(h_ccdis_un);
-    hs_un->Add(h_ccres_un);
-    hs_un->Add(h_ccqe_un);
-
+    //Store the unsmeared component histograms
     v_un.push_back(h_cccoh_un);
     v_un.push_back(h_ccdis_un);
     v_un.push_back(h_ccres_un);
     v_un.push_back(h_ccqe_un);
 
-    h_cccoh_sm->SetFillColor(kMagenta+2);
-    h_ccdis_sm->SetFillColor(kBlue-4);
-    h_ccres_sm->SetFillColor(kGreen-4);
-    h_ccqe_sm->SetFillColor(kRed-4);
-    h_nc_sm->SetFillColor(kOrange);
-    TLegend *leg2 = new TLegend(0.2,0.8,0.4,0.4);
-    leg2->AddEntry(h_cccoh_sm,"CCCOH","f");
-    leg2->AddEntry(h_ccdis_sm,"CCDIS","f");
-    leg2->AddEntry(h_ccres_sm,"CCRES","f");
-    leg2->AddEntry(h_ccqe_sm,"CCQE","f");
-    leg2->AddEntry(h_nc_sm,"NC1pi","f");
-    hs_sm->Add(h_nc_sm);
-    hs_sm->Add(h_cccoh_sm);
-    hs_sm->Add(h_ccdis_sm);
-    hs_sm->Add(h_ccres_sm);
-    hs_sm->Add(h_ccqe_sm);
-
+    //Store the smeared component histograms
     v_sm.push_back(h_nc_sm);
     v_sm.push_back(h_cccoh_sm);
     v_sm.push_back(h_ccdis_sm);
@@ -426,20 +349,36 @@ void Smear ( TTree *tree,
 
     f->cd();
     
-    h_smeared->Draw("colz");
-    h_smeared->SetStats(kFALSE);
+    //Format the smeared total 2D histogram and write to file
     h_smeared->GetXaxis()->SetTitle("cos#theta_{#mu}");
     h_smeared->GetYaxis()->SetTitle("T_{#mu}");
     h_smeared->Write("distribution_after_impure");
 
-    hs_un->Draw();
-    leg->Draw("same");
+    //Format the unsmeared stacked histogram and write to file
+    h_cccoh_un->SetFillColor(kMagenta+2);
+    h_ccdis_un->SetFillColor(kBlue-4);
+    h_ccres_un->SetFillColor(kGreen-4);
+    h_ccqe_un->SetFillColor(kRed-4);
+    hs_un->Add(h_cccoh_un);
+    hs_un->Add(h_ccdis_un);
+    hs_un->Add(h_ccres_un);
+    hs_un->Add(h_ccqe_un);
     hs_un->Write("Stacked_hist_before_smearing");
 
-    hs_sm->Draw();
-    leg2->Draw("same");
+    //Format the smeared stacked histograms and write to file
+    h_cccoh_sm->SetFillColor(kMagenta+2);
+    h_ccdis_sm->SetFillColor(kBlue-4);
+    h_ccres_sm->SetFillColor(kGreen-4);
+    h_ccqe_sm->SetFillColor(kRed-4);
+    h_nc_sm->SetFillColor(kOrange);
+    hs_sm->Add(h_nc_sm);
+    hs_sm->Add(h_cccoh_sm);
+    hs_sm->Add(h_ccdis_sm);
+    hs_sm->Add(h_ccres_sm);
+    hs_sm->Add(h_ccqe_sm);
     hs_sm->Write("Stacked_hist_after_smearing");
 
+    //Create stacked histogram for just Tmu dependence before smearing
     THStack *hs_Tmu_un = new THStack("hs_Tmu_un","");
     hs_Tmu_un->Add(h_cccoh_un->ProjectionY());
     hs_Tmu_un->Add(h_ccdis_un->ProjectionY());
@@ -447,6 +386,7 @@ void Smear ( TTree *tree,
     hs_Tmu_un->Add(h_ccqe_un->ProjectionY());
     hs_Tmu_un->Write("Tmu unsmeared Stack");
 
+    //Create stacked histogram for cos theta mu before smearing
     THStack *hs_ctmu_un = new THStack("hs_ctmu_un","");
     hs_ctmu_un->Add(h_cccoh_un->ProjectionX());
     hs_ctmu_un->Add(h_ccdis_un->ProjectionX());
@@ -454,6 +394,7 @@ void Smear ( TTree *tree,
     hs_ctmu_un->Add(h_ccqe_un->ProjectionX());
     hs_ctmu_un->Write("costhetamu unsmeared Stack");
 
+    //Create stacked histogram for Tmu after smearing
     THStack *hs_Tmu_sm = new THStack("hs_Tmu_sm","");
     hs_Tmu_sm->Add(h_nc_sm->ProjectionY());
     hs_Tmu_sm->Add(h_cccoh_sm->ProjectionY());
@@ -462,6 +403,7 @@ void Smear ( TTree *tree,
     hs_Tmu_sm->Add(h_ccqe_sm->ProjectionY());
     hs_Tmu_sm->Write("Tmu smeared Stack");
 
+    //Create stacked histogram for cos theta mu after smearing
     THStack *hs_ctmu_sm = new THStack("hs_ctmu_sm","");
     hs_ctmu_sm->Add(h_nc_sm->ProjectionX());
     hs_ctmu_sm->Add(h_cccoh_sm->ProjectionX());
@@ -470,9 +412,11 @@ void Smear ( TTree *tree,
     hs_ctmu_sm->Add(h_ccqe_sm->ProjectionX());
     hs_ctmu_sm->Write("costhetamu smeared Stack");
 
-
 }
 
+// -------------------------------------------------------------------------
+//                             Slicing function
+// -------------------------------------------------------------------------
 void Slices ( TH2D *h_unsmeared, TH2D *h_smeared ){
 
     // Firstly, loop over all Tmu bins on draw slices in cos theta mu
@@ -633,11 +577,19 @@ void Slices ( TH2D *h_unsmeared, TH2D *h_smeared ){
 
 }
 
+// -------------------------------------------------------------------------
+//                  Stacked histogram slicing function
+// -------------------------------------------------------------------------
 void SliceStack ( std::vector<TH2*> v_un, std::vector<TH2*> v_sm, TFile *f ){
 
     f->cd();
 
-    for ( size_t j = 1; j < 21; j++ ){
+    // Firstly, loop over all Tmu bins on draw slices in cos theta mu
+    // Take the bin edges to be the title
+    int x_bins = v_un[0]->GetNbinsX(); // Cos theta
+    int y_bins = v_un[0]->GetNbinsY(); // Tmu
+
+    for ( int j = 1; j < x_bins+1; j++ ){
    
       // Make the title for the current histogram and the file name
       // Clear the title for the new loop
@@ -679,7 +631,7 @@ void SliceStack ( std::vector<TH2*> v_un, std::vector<TH2*> v_sm, TFile *f ){
 
     }
 
-   for ( size_t j = 1; j < 19; j++ ){
+   for ( int j = 1; j < y_bins+1; j++ ){
    
       // Make the title for the current histogram and the file name
       // Clear the title for the new loop

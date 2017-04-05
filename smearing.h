@@ -42,7 +42,6 @@
 // -------------------------------------------------------------------------
 
 void Smear ( TTree *tree, 
-             TH2D *h_unsmeared, 
              TH2D *h_smeared,
              std::vector<TH2*> &v_un,
              std::vector<TH2*> &v_sm,
@@ -58,5 +57,5 @@ void Slices ( TH2D *h_unsmeared,
               TH2D *h_smeared);
 
 void SliceStack ( std::vector<TH2*> v_un,
-              std::vector<TH2*> v_sm,
-              TFile *f);
+                  std::vector<TH2*> v_sm,
+                  TFile *f);
