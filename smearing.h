@@ -36,23 +36,25 @@
 #include "TObjArray.h"
 #include "TGaxis.h"
 #include "TError.h"
-/*
+
 #include "TRandom.h"
 #include "RooUnfoldResponse.h"
 #include "RooUnfoldBayes.h"
 #include "RooUnfold.h"
-*/
+
 // -------------------------------------------------------------------------
 // Smearing function:
 // For the 2D histogram, smear the cos theta bins by 5 deg and the Tmu bins
 // by 10%
 // -------------------------------------------------------------------------
 
-void Smear ( TTree *tree, 
+void Smear ( TTree *tree,
+             TTree *traintree,
              TH2D *h_smeared,
              std::vector<TH2*> &v_un,
              std::vector<TH2*> &v_sm,
-             std::vector<TH2*> &v_sm_rec); 
+             std::vector<TH2*> &v_sm_rec,
+             std::vector<TH2*> &v_unf); 
 
 
 // -------------------------------------------------------------------------
@@ -61,8 +63,10 @@ void Smear ( TTree *tree,
 // -------------------------------------------------------------------------
 
 void Slices ( TH2D *h_unsmeared, 
-              TH2D *h_smeared);
+              TH2D *h_smeared,
+              std::vector<TH2*> v_unf);
 
 void SliceStack ( std::vector<TH2*> v_un,
                   std::vector<TH2*> v_sm,
-                  std::vector<TH2*> v_sm_rec);
+                  std::vector<TH2*> v_sm_rec,
+                  std::vector<TH2*> v_unf);

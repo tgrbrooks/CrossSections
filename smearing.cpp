@@ -16,11 +16,11 @@
 
 using namespace std;
 
+// -------------------------------------------------------
+//              Kinetic energy smearing function
+// -------------------------------------------------------
 double SmearKE(double ke, ROOT::Math::GSLRngMT *_random_gen){
 
-  // -------------------------------------------------------
-  //                      Kinetic energy
-  // -------------------------------------------------------
   // Calculate the mean and sigma for the LogNormal function
   //      zeta  = TMath::Log( m * ( 1 / sqrt( 1 + ( var / pow( m, 2 ) ) ) ) );
   //      sigma = sqrt( log( 1 + ( var / pow( m, 2 ) ) ) );
@@ -31,49 +31,56 @@ double SmearKE(double ke, ROOT::Math::GSLRngMT *_random_gen){
   double sigma   = TMath::Sqrt( TMath::Log( 1 + ( var / TMath::Power( ( ke ), 2 ) ) ) );
   double zeta    = TMath::Log( ( ke ) * ( 1 / TMath::Sqrt( 1 + ( var / TMath::Power( ( ke ), 2 ) ) ) ) );
   double lognorm = _random_gen->LogNormal( zeta, sigma );
+  /*double lognorm = ke + _random_gen->Gaussian(0.1);
+  if (lognorm < 0) lognorm = 0;*/
 
   return lognorm;
 }
 
+
+// -------------------------------------------------------
+//              Cos theta smearing function
+// -------------------------------------------------------
 double SmearCosTheta(double costheta, ROOT::Math::GSLRngMT *_random_gen){
     
-  // -------------------------------------------------------
-  //                      Cos theta
-  // -------------------------------------------------------
-
   // Calculate the mean and sigma for the LogNormal function
   //      theta = acos(costtheta)
   //      var   = 5 degrees
 
   double sd_theta = TMath::Pi() / 36; // 5 degrees
   double gaus_theta = TMath::ACos( costheta ) + _random_gen->Gaussian( sd_theta );
-  double gaus_costheta = TMath::Cos( gaus_theta ); 
+  double gaus_costheta = TMath::Cos( gaus_theta );
 
   return gaus_costheta;
 }
 
-void StackProjectionY(std::vector<TH2*> histograms, string legendlabels[], string filename, int bin, TCanvas *canvas){
+// -------------------------------------------------------
+//  Function to get Y projection of stacked histograms
+// -------------------------------------------------------
+void StackProjectionY(std::vector<TH2*> histograms, string legendlabels[], string filename, int bin, TCanvas *canvas, TH2* h_unf, bool isTruth){
+  
   canvas->Clear();
+
   // Make the title for the current histogram and the file name
   // Clear the title for the new loop
   stringstream conv;
   conv.clear();
-
   string title;
   title.clear();
-
   conv << setprecision(4) << "~/Documents/PhD/CrossSections/output/cosslicestack/" << filename 
        << histograms[0]->GetXaxis()->GetBinLowEdge(bin) << ";" << histograms[0]->GetXaxis()->GetBinLowEdge(bin+1) << ".root";
   title = conv.str();
 
+  //Create a temporary stacked histogram for the Y projection
   THStack *hs_Tmu_un_tmp = new THStack("hs_tmu_un_tmp","");
   TLegend *leg_Tmu_un = new TLegend( 0.584, 0.614, 0.901, 0.904 );
   for ( size_t i = 0; i < histograms.size(); i++){
-    //Fill THStack with projection Y of v_un for the jth bin
+    //Fill THStack with projection Y of ith histogram for the jth bin
     TH1D *temphist = histograms[i]->ProjectionY(std::to_string(i).c_str(),bin,bin);
     temphist->SetLineWidth(1);
     temphist->SetLineColor(temphist->GetFillColor());
     temphist->SetFillStyle(1001);
+    //Change fill style for background events
     if(legendlabels[i]=="NC 1#pi"||legendlabels[i]=="NC Other"||legendlabels[i]=="NC n#pi"){
       temphist->SetFillStyle(3004);
     }
@@ -81,37 +88,55 @@ void StackProjectionY(std::vector<TH2*> histograms, string legendlabels[], strin
     leg_Tmu_un->AddEntry(temphist,legendlabels[i].c_str(),"f");
   }
   hs_Tmu_un_tmp->Draw();
+
+  // If the histograms are of unsmeared truth variables plot the unfolding results on top of them
+  if (isTruth){
+    TH1D* hUnf = h_unf->ProjectionY("unf",bin,bin);
+    hUnf->SetLineWidth(1);
+    hUnf->SetLineColor(kBlack);
+    hUnf->SetMarkerStyle(20);
+    hUnf->SetMarkerSize(0.6);
+    hUnf->Draw("E1 SAME");
+  }
   hs_Tmu_un_tmp->GetXaxis()->SetTitle("T_{#mu} (GeV)");
   hs_Tmu_un_tmp->GetYaxis()->SetTitle("Number of SBND Events");
   canvas->Modified();
   leg_Tmu_un->Draw();
   canvas->SaveAs(title.c_str());
+
+  //Clean up
   delete hs_Tmu_un_tmp;
   delete leg_Tmu_un;
+
 }
 
-void StackProjectionX(std::vector<TH2*> histograms, string legendlabels[], string filename, int bin, TCanvas *canvas){
+// -------------------------------------------------------
+//  Function to get X projection of stacked histograms
+// -------------------------------------------------------
+void StackProjectionX(std::vector<TH2*> histograms, string legendlabels[], string filename, int bin, TCanvas *canvas, TH2* h_unf, bool isTruth){
+
   canvas->Clear();
+  
   // Make the title for the current histogram and the file name
   // Clear the title for the new loop
   stringstream conv;
   conv.clear();
-
   string title;
   title.clear();
-
   conv << setprecision(4) << "~/Documents/PhD/CrossSections/output/tmuslicestack/" << filename 
        << histograms[0]->GetYaxis()->GetBinLowEdge(bin) << ";" << histograms[0]->GetYaxis()->GetBinLowEdge(bin+1) << ".root";
   title = conv.str();
 
+  //Create a temporary stacked histogram for the X projection
   THStack *hs_cosmu_un_tmp = new THStack("hs_cosmu_un_tmp","");
   TLegend *leg_cosmu_un = new TLegend( 0.152, 0.598, 0.332, 0.887 );
   for ( size_t i = 0; i < histograms.size(); i++){
-    //Fill THStack with projection Y of v_un for the jth bin
+    //Fill THStack with projection X of ith histogram for the jth bin
     TH1D *temphist = histograms[i]->ProjectionX(std::to_string(i).c_str(),bin,bin);
     temphist->SetLineWidth(1);
     temphist->SetLineColor(temphist->GetFillColor());
     temphist->SetFillStyle(1001);
+    //Change fill style for background events
     if(legendlabels[i]=="NC 1#pi"||legendlabels[i]=="NC Other"||legendlabels[i]=="NC n#pi"){
       temphist->SetFillStyle(3004);
     }
@@ -119,16 +144,122 @@ void StackProjectionX(std::vector<TH2*> histograms, string legendlabels[], strin
     leg_cosmu_un->AddEntry(temphist,legendlabels[i].c_str(),"f");
   }
   hs_cosmu_un_tmp->Draw();
+
+  // If the histograms are of unsmeared truth variables plot the unfolding results on top of them
+  if (isTruth){
+    TH1D* hUnf = h_unf->ProjectionX("unf",bin,bin);
+    hUnf->SetLineWidth(1);
+    hUnf->SetLineColor(kBlack);
+    hUnf->SetMarkerStyle(20);
+    hUnf->SetMarkerSize(0.6);
+    hUnf->Draw("E1 SAME");
+  }
   hs_cosmu_un_tmp->GetXaxis()->SetTitle("cos#theta_{#mu}");
   hs_cosmu_un_tmp->GetYaxis()->SetTitle("Number of SBND Events");
   canvas->Modified();
   leg_cosmu_un->Draw();
   canvas->SaveAs(title.c_str());
+
+  // Clean up
   delete hs_cosmu_un_tmp;
   delete leg_cosmu_un;
 }
 
+// -------------------------------------------------------
+//  Function to get correlation histogram from unfolding
+// -------------------------------------------------------
+TH2D* CorrelationHist (const TMatrixD& cov,
+                       const char* name, const char* title,
+                       Double_t lo, Double_t hi) 
+{
+  //Pulled from RooUnfold unit tests
+  Int_t nb= cov.GetNrows();
+  TH2D* h= new TH2D (name, title, nb, lo, hi, nb, lo, hi);
+  h->SetAxisRange (-1.0, 1.0, "Z");
+  for(int i=0; i < nb; i++)
+    for(int j=0; j < nb; j++) {
+      Double_t Viijj= cov(i,i)*cov(j,j);
+      if (Viijj>0.0) h->SetBinContent (i+1, j+1, cov(i,j)/sqrt(Viijj));
+    }   
+  return h;
+}
 
+// -------------------------------------------------------
+//  Function to test smearing on 2D delta function
+// -------------------------------------------------------
+void TestSmearing(double cos, double tmu) {
+
+  //Create canvases and histograms
+  TCanvas *ctest = new TCanvas("ctest","",800,600);
+  TLegend *ltest = new TLegend( 0.152, 0.704, 0.469, 0.88 );
+  TH2D* h_before = new TH2D("h_before","before;cos#theta_{#mu};T_{#mu} (GeV)",200,-1,1,180,0,2);
+  TH2D* h_after = new TH2D("h_after","after;cos#theta_{#mu};T_{#mu} (GeV)",200,-1,1,180,0,2);
+
+  //Initialise random number generator
+  ROOT::Math::GSLRngMT *_rand_gen = new ROOT::Math::GSLRngMT;
+  _rand_gen->Initialize();    
+  _rand_gen->SetSeed( time( NULL ) );
+
+  //Populate histograms
+  for (int i=0; i<10000; ++i){
+    double smear_cos = SmearCosTheta(cos,_rand_gen);
+    h_before->Fill(cos,tmu);
+    h_after->Fill(smear_cos,SmearKE(tmu,_rand_gen));
+  }
+
+  //Get X and Y projections
+  TH1D* h_beforeX = h_before->ProjectionX("px6",1,180);
+  TH1D* h_beforeY = h_before->ProjectionY("py6",1,200);
+  TH1D* h_afterX = h_after->ProjectionX("px7",1,180);
+  TH1D* h_afterY = h_after->ProjectionY("py7",1,200);
+
+  ctest->SetLeftMargin(0.12);
+  ctest->SetRightMargin(0.15);
+
+  //Plot 2D histograms
+  h_before->SetTitleOffset(0.75,"Y");
+  h_before->Draw("COLZ");
+  ctest->SaveAs("~/Documents/PhD/CrossSections/output/smeartest/before2D.root");
+  ctest->Clear();
+
+  h_after->SetTitleOffset(0.75,"Y");
+  h_after->Draw("COLZ");
+  ctest->SaveAs("~/Documents/PhD/CrossSections/output/smeartest/after2D.root");
+  ctest->Clear();
+
+  ctest->SetLeftMargin(0.12);
+  ctest->SetRightMargin(0.1);
+
+  //Plot X and Y projections
+  //Cos theta mu
+  h_beforeX->SetLineColor(kRed + 2);
+  h_beforeX->GetYaxis()->SetTitle("Events");
+  h_afterX->SetLineColor(kGreen + 2);
+  ltest->AddEntry(h_beforeX,"Unsmeared","l");
+  ltest->AddEntry(h_afterX,"Smeared","l");
+  h_beforeX->Draw();
+  h_afterX->Draw("same");
+  ltest->Draw();
+  ctest->SaveAs("~/Documents/PhD/CrossSections/output/smeartest/costheta.root");
+  ctest->Clear();
+  ltest->Clear();
+
+  //Tmu
+  h_beforeY->SetLineColor(kRed + 2);
+  h_beforeY->GetYaxis()->SetTitle("Events");
+  h_afterY->SetLineColor(kGreen + 2);
+  ltest->AddEntry(h_beforeY,"Unsmeared","l");
+  ltest->AddEntry(h_afterY,"Smeared","l");
+  h_beforeY->Draw();
+  h_afterY->Draw("same");
+  ltest->Draw();
+  ctest->SaveAs("~/Documents/PhD/CrossSections/output/smeartest/tmu.root");
+  ctest->Clear();
+
+  delete ctest;
+  delete ltest;
+
+}
 
 int smearing() {
 
@@ -201,17 +332,18 @@ int smearing() {
     std::vector<TH2*> v_un;
     std::vector<TH2*> v_sm;
     std::vector<TH2*> v_sm_rec;
+    std::vector<TH2*> v_unf;
     
     // The same histogram definitions for the smeared distributions
     TH2D *h_sm = new TH2D("h_sm"," T_{#mu} - cos#theta_{#mu} distribution after smearing, impurity ",20,-1,1,18,0,2);
     
     // Take h_un and smear it
-    Smear(def_tree, h_sm, v_un, v_sm, v_sm_rec);
+    Smear(def_tree, train_tree, h_sm, v_un, v_sm, v_sm_rec, v_unf);
 
     // The the 2 2D histograms and draw slices in Tmu and cos theta mu
-    Slices( h_un, h_sm );
+    Slices( h_un, h_sm, v_unf );
 
-    SliceStack( v_un, v_sm, v_sm_rec);
+    SliceStack( v_un, v_sm, v_sm_rec, v_unf);
 
     TCanvas *canvas = new TCanvas("canvas","",800,600);
     canvas->SetLeftMargin(0.12);
@@ -259,6 +391,8 @@ int smearing() {
     canvas->SaveAs("~/Documents/PhD/CrossSections/output/effpur/impur.root");
     delete canvas;
 
+    TestSmearing(0.5,0.5);
+
     return 0;
 }
 
@@ -270,10 +404,12 @@ int smearing() {
 // -------------------------------------------------------------------------
 
 void Smear ( TTree *tree, 
+             TTree *traintree,
              TH2D  *h_smeared, 
              std::vector<TH2*> &v_un,
              std::vector<TH2*> &v_sm,
-             std::vector<TH2*> &v_sm_rec){
+             std::vector<TH2*> &v_sm_rec,
+             std::vector<TH2*> &v_unf){
 
     TCanvas *canv = new TCanvas("canv","",800,600);
     canv->SetLeftMargin(0.12);
@@ -283,17 +419,20 @@ void Smear ( TTree *tree,
     ROOT::Math::GSLRngMT *_random_gen = new ROOT::Math::GSLRngMT;
     _random_gen->Initialize();    
     _random_gen->SetSeed( time( NULL ) );
-/*
+
     TRandom *_rand = new TRandom( time( NULL ) );
 
-    TH2D *hTrainTrue= new TH2D ("traintrue", "Training Truth", 20, -1, 1, 18, 0, 2);
-    hTrainTrue->SetLineColor(kBlue);
-    TH2D *hTrain= new TH2D ("train", "Training Measured", 20, -1, 1, 18, 0, 2);
-    hTrain->SetLineColor(kRed);
+    TH2D *hTrainTrue= new TH2D ("traintrue", "Training Truth;cos#theta_{#mu};T_{#mu} (GeV)", 20, -1, 1, 18, 0, 2);
+    hTrainTrue->SetLineColor(kRed + 2);
+    TH2D *hTrain= new TH2D ("train", "Training Measured;cos#theta_{#mu};T_{#mu} (GeV)", 20, -1, 1, 18, 0, 2);
+    hTrain->SetLineColor(kGreen + 2);
+    TH2D *hTrainFake= new TH2D ("trainfake", "Training Fakes;cos#theta_{#mu};T_{#mu} (GeV)", 20, -1, 1, 18, 0, 2);
     RooUnfoldResponse response(hTrain, hTrainTrue);
-    TH2D *hTrue = new TH2D("true", "Test Truth", 20, -1, 1, 18, 0, 2);
-    TH2D *hMeas = new TH2D("meas", "Test Measured", 20, -1 ,1, 18, 0, 2);
-
+    TH2D *hTrue = new TH2D("true", "Test Truth;cos#theta_{#mu};T_{#mu} (GeV)", 20, -1, 1, 18, 0, 2);
+    hTrue->SetLineColor(kRed + 2);
+    TH2D *hMeas = new TH2D("meas", "Test Measured;cos#theta_{#mu};T_{#mu} (GeV)", 20, -1 ,1, 18, 0, 2);
+    hMeas->SetLineColor(kGreen + 2);
+/*
     //Train on a flat distribution
     for (int i = 0; i<1000000; i++){
       double costheta = _rand->Uniform(-1,1);
@@ -308,8 +447,112 @@ void Smear ( TTree *tree,
       else response.Miss(costheta,tmu);
     }
 */
+
+    //Train on events generated without MEC
+    // Get the branches
+    TBranch *bt_nf    = traintree->GetBranch( "nf" );
+    TBranch *bt_nfp   = traintree->GetBranch( "nfp" );
+    TBranch *bt_cthl  = traintree->GetBranch( "cthl" );
+    TBranch *bt_El    = traintree->GetBranch( "El" );
+    TBranch *bt_pl    = traintree->GetBranch( "pl" );
+    TBranch *bt_fspl  = traintree->GetBranch( "fspl" );
+    TBranch *bt_cthf  = traintree->GetBranch( "cthf" );
+    TBranch *bt_Ef    = traintree->GetBranch( "Ef" );
+    //TBranch *bt_pf    = traintree->GetBranch( "pf" );
+    TBranch *bt_pdgf  = traintree->GetBranch( "pdgf" );
+    TBranch *bt_cc    = traintree->GetBranch( "cc" );
+    TBranch *bt_nc    = traintree->GetBranch( "nc" );
+    
+    // Number of events in the TTree
+    int nt_values = traintree->GetEntries();
+   
+    double m_mu = 0.10566; // Muon mass, GeV
+    double m_pi = 0.13957; // Charged pion mass, GeV
+
+    // Loop over the entries of the tree and calculate the kinetic energies 
+    // of the muons and pions and define the impurity
+    for ( int i = 0; i < nt_values; ++i ){
+        
+        traintree->GetEntry(i);
+     
+        double T_mu, e_mu;
+
+        // Get values from the branches
+        int nf   = bt_nf->GetLeaf("nf")->GetValue();
+        int nfp  = bt_nfp->GetLeaf("nfp")->GetValue();
+        double fspl  = bt_fspl->GetLeaf( "fspl" )->GetValue(); 
+        double cc    = bt_cc->GetLeaf( "cc" )->GetValue(); 
+        double nc    = bt_nc->GetLeaf( "nc" )->GetValue(); 
+        double El    = bt_El->GetLeaf( "El" )->GetValue();
+        double pl    = bt_pl->GetLeaf( "pl" )->GetValue();
+        double cthl  = bt_cthl->GetLeaf( "cthl" )->GetValue();
+
+        // Kinetic energy of the final state primary lepton
+        T_mu = El - m_mu;
+
+        //Count the CC numu event types before smearing
+        if ( fspl == 13 && cc == 1 ) {
+
+          double cthl_smeared = SmearCosTheta(cthl,_random_gen);
+          double T_mu_smeared = SmearKE(T_mu,_random_gen);
+
+          hTrainTrue->Fill(cthl,T_mu);
+
+          //Count the CC numu event types after smearing
+          if ( T_mu > 0.05 ){
+ 
+            hTrain->Fill(cthl_smeared, T_mu_smeared);
+            response.Fill(cthl_smeared, T_mu_smeared, cthl, T_mu);
+          }
+          else {
+            response.Miss(cthl, T_mu);
+          }
+        }
+
+        // Find NCnpi events
+        if ( nc == 1 ){ 
+
+          double prev_e_pi = 0;
+          double prev_cos_pi = 0;
+
+          //Loop over all the final state hadronic particles
+          for (int j = 0; j<nf; ++j) {
+
+            bt_pdgf->GetEntry(i);
+            bt_cthf->GetEntry(i);
+            bt_Ef->GetEntry(i);
+
+            int pdgf = bt_pdgf->GetLeaf("pdgf")->GetValue(j);
+            double e_pi = bt_Ef->GetLeaf("Ef")->GetValue(j);
+            double cos_pi = bt_cthf->GetLeaf("cthf")->GetValue(j);
+
+            // If one of the hadrons is a pion use a random number to check if it is misidentified
+            if (pdgf == 211 || pdgf == -211){
+              int random;
+              random = rand() % 5 + 1; // CHANGE FROM 20% TO 2%
+              // If more than one is misidentified assume the higher energy one is muon
+              if ( random == 5 && e_pi > prev_e_pi ) {
+                prev_e_pi = e_pi;
+                prev_cos_pi = cos_pi;
+              }
+            }
+          }
+          //Kinetic energy
+          double T_pi = prev_e_pi - m_pi;
+          // If at least one pion is misidentified and it has a high enough energy to be detected record it as a muon
+          if( prev_e_pi != 0 && T_pi > 0.05){
+            //Smear the pion energy and angle
+            double cos_pi_smeared = SmearCosTheta(prev_cos_pi,_random_gen);
+            double T_pi_smeared = SmearKE(T_pi,_random_gen);
+            hTrain->Fill(cos_pi_smeared, T_pi_smeared);
+            hTrainFake->Fill(cos_pi_smeared, T_pi_smeared);
+            response.Fake(cos_pi_smeared, T_pi_smeared);
+          }
+        }
+    }
+
     // Stacked unsmeared histogram - truth variables
-    THStack *hs_un = new THStack("hs_un","Stacked Histograms");
+    THStack *hs_un = new THStack("hs_un","Stacked Histograms;cos#theta_{#mu};T_{#mu} (GeV)");
     TH2D *h_ccqe_un = new TH2D("h_ccqe_un","CCQE",20,-1,1,18,0,2);
     TH2D *h_ccres_un = new TH2D("h_ccres_un","CCRES",20,-1,1,18,0,2);
     TH2D *h_ccdis_un = new TH2D("h_ccdis_un","CCDIS",20,-1,1,18,0,2);
@@ -317,7 +560,7 @@ void Smear ( TTree *tree,
     TH2D *h_ccmec_un = new TH2D("h_ccmec_un","CCMEC",20,-1,1,18,0,2);
 
     // Stacked smeared histogram - truth variables
-    THStack *hs_sm = new THStack("hs_sm","Stacked Histograms");
+    THStack *hs_sm = new THStack("hs_sm","Stacked Histograms;cos#theta_{#mu};T_{#mu} (GeV)");
     TH2D *h_ccqe_sm = new TH2D("h_ccqe_sm","CCQE",20,-1,1,18,0,2);
     TH2D *h_ccres_sm = new TH2D("h_ccres_sm","CCRES",20,-1,1,18,0,2);
     TH2D *h_ccdis_sm = new TH2D("h_ccdis_sm","CCDIS",20,-1,1,18,0,2);
@@ -326,7 +569,7 @@ void Smear ( TTree *tree,
     TH2D *h_ccmec_sm = new TH2D("h_ccmec_sm","CCMEC",20,-1,1,18,0,2);
 
     // Stacked smeared histogram - reco variables
-    THStack *hs_sm_rec = new THStack("hs_sm_rec","Stacked Histograms");
+    THStack *hs_sm_rec = new THStack("hs_sm_rec","Stacked Histograms;cos#theta_{#mu};T_{#mu} (GeV)");
     TH2D *h_cc0pi0p_sm = new TH2D("h_cc0pi0p_sm","CC 0pi 0p",20,-1,1,18,0,2);
     TH2D *h_cc0pi1p_sm = new TH2D("h_cc0pi1p_sm","CC 0pi 1p",20,-1,1,18,0,2);
     TH2D *h_cc0pi2p_sm = new TH2D("h_cc0pi2p_sm","CC 0pi 2p",20,-1,1,18,0,2);
@@ -345,11 +588,11 @@ void Smear ( TTree *tree,
     TBranch *b_nfp   = tree->GetBranch( "nfp" );
     TBranch *b_cthl  = tree->GetBranch( "cthl" );
     TBranch *b_El    = tree->GetBranch( "El" );
-    TBranch *b_pl    = tree->GetBranch( "pl" );
+    //TBranch *b_pl    = tree->GetBranch( "pl" );
     TBranch *b_fspl  = tree->GetBranch( "fspl" );
     TBranch *b_cthf  = tree->GetBranch( "cthf" );
     TBranch *b_Ef    = tree->GetBranch( "Ef" );
-    TBranch *b_pf    = tree->GetBranch( "pf" );
+    //TBranch *b_pf    = tree->GetBranch( "pf" );
     TBranch *b_pdgf  = tree->GetBranch( "pdgf" );
     TBranch *b_cc    = tree->GetBranch( "cc" );
     TBranch *b_nc    = tree->GetBranch( "nc" );
@@ -364,9 +607,6 @@ void Smear ( TTree *tree,
     
     // Number of events in the TTree
     int n_values = tree->GetEntries();
-   
-    double m_mu = 0.10566; // Muon mass, GeV
-    double m_pi = 0.13957; // Charged pion mass, GeV
 
     // Counters for different types of neutrino interaction
     int ccqe_count_un = 0; int ccqe_count_sm = 0;
@@ -400,7 +640,7 @@ void Smear ( TTree *tree,
         double nfpim = b_nfpim->GetLeaf( "nfpim" )->GetValue();
         double nfpi0 = b_nfpi0->GetLeaf( "nfpi0" )->GetValue();
         double El    = b_El->GetLeaf( "El" )->GetValue();
-        double pl    = b_pl->GetLeaf( "pl" )->GetValue();
+        //double pl    = b_pl->GetLeaf( "pl" )->GetValue();
         double cthl  = b_cthl->GetLeaf( "cthl" )->GetValue();
         double qel   = b_qel->GetLeaf( "qel" )->GetValue();
         double res   = b_res->GetLeaf( "res" )->GetValue();
@@ -426,7 +666,7 @@ void Smear ( TTree *tree,
           double cthl_smeared = SmearCosTheta(cthl,_random_gen);
           double T_mu_smeared = SmearKE(T_mu,_random_gen);
 
-//          hTrue->Fill(cthl,T_mu);
+          hTrue->Fill(cthl,T_mu);
 
           //Count the CC numu event types after smearing
           if ( T_mu > 0.05 ){
@@ -452,10 +692,10 @@ void Smear ( TTree *tree,
             else if ( nfpip+nfpim == 2 ) { h_cc2pipm_sm->Fill(cthl_smeared,T_mu_smeared); }
             else { h_ccother_sm->Fill(cthl_smeared,T_mu_smeared); }
 
-            h_smeared->Fill(SmearCosTheta(cthl,_random_gen),SmearKE(T_mu,_random_gen));
+            h_smeared->Fill(cthl_smeared, T_mu_smeared);
             ccinc_count_sm++;
 
-  //          hMeas->Fill(cthl_smeared,T_mu_smeared);
+            hMeas->Fill(cthl_smeared,T_mu_smeared);
           }
         }
 
@@ -499,6 +739,8 @@ void Smear ( TTree *tree,
             h_nc_sm->Fill(cos_pi_smeared, T_pi_smeared);
             h_smeared->Fill(cos_pi_smeared, T_pi_smeared);
             imp_count++;
+
+            hMeas->Fill(cos_pi_smeared, T_pi_smeared);
 
             if ( nfpip+nfpim==1 ){ h_nc1pi_sm->Fill(cos_pi_smeared,T_pi_smeared); }
             else { h_ncother_sm->Fill(cos_pi_smeared,T_pi_smeared); }
@@ -572,7 +814,7 @@ void Smear ( TTree *tree,
     hs_un->Add(h_ccres_un);
     hs_un->Add(h_ccqe_un);
     hs_un->Add(h_ccmec_un);
-    hs_un->Draw();
+    hs_un->Draw("COLZ");
     canv->SaveAs("~/Documents/PhD/CrossSections/output/total/unsmeared_stacked.root");
     canv->Clear();
 
@@ -589,7 +831,7 @@ void Smear ( TTree *tree,
     hs_sm->Add(h_ccres_sm);
     hs_sm->Add(h_ccqe_sm);
     hs_sm->Add(h_ccmec_sm);
-    hs_sm->Draw();
+    hs_sm->Draw("COLZ");
     canv->SaveAs("~/Documents/PhD/CrossSections/output/total/smeared_stacked.root");
     canv->Clear();
 
@@ -621,104 +863,155 @@ void Smear ( TTree *tree,
     hs_sm_rec->Draw("LEGO1");
     canv->SaveAs("~/Documents/PhD/CrossSections/output/total/reco_stacked.root");
     canv->Clear();
-/*
-    //Create stacked histogram for just Tmu dependence before smearing
-    THStack *hs_Tmu_un = new THStack("hs_Tmu_un","");
-    hs_Tmu_un->Add(h_cccoh_un->ProjectionY());
-    hs_Tmu_un->Add(h_ccdis_un->ProjectionY());
-    hs_Tmu_un->Add(h_ccres_un->ProjectionY());
-    hs_Tmu_un->Add(h_ccqe_un->ProjectionY());
-    hs_Tmu_un->Add(h_ccmec_un->ProjectionY());
-    hs_Tmu_un->GetXaxis()->SetTitle("T_{#mu} (GeV)");
-    hs_Tmu_un->GetYaxis()->SetTitle("Number of SBND Events");
-    hs_Tmu_un->Draw();
 
-    //Create stacked histogram for Tmu after smearing
-    THStack *hs_Tmu_sm = new THStack("hs_Tmu_sm","");
-    hs_Tmu_sm->Add(h_nc_sm->ProjectionY());
-    hs_Tmu_sm->Add(h_cccoh_sm->ProjectionY());
-    hs_Tmu_sm->Add(h_ccdis_sm->ProjectionY());
-    hs_Tmu_sm->Add(h_ccres_sm->ProjectionY());
-    hs_Tmu_sm->Add(h_ccqe_sm->ProjectionY());
-    hs_Tmu_sm->Add(h_ccmec_sm->ProjectionY());
-    hs_Tmu_sm->Draw("SAME");
-    canv->SaveAs("~/Documents/PhD/CrossSections/output/total/Tmu_total.root");
-    canv->Clear();
+    // Do the unfolding
+    RooUnfoldBayes unfold(&response, hMeas, 10);
+    TH2D* hReco = (TH2D*)unfold.Hreco((RooUnfold::ErrorTreatment)2);
+    //unfold.PrintTable(cout,hTrue);
 
-    //Create stacked histogram for cos theta mu before smearing
-    THStack *hs_ctmu_un = new THStack("hs_ctmu_un","");
-    hs_ctmu_un->Add(h_cccoh_un->ProjectionX());
-    hs_ctmu_un->Add(h_ccdis_un->ProjectionX());
-    hs_ctmu_un->Add(h_ccres_un->ProjectionX());
-    hs_ctmu_un->Add(h_ccqe_un->ProjectionX());
-    hs_ctmu_un->Add(h_ccmec_un->ProjectionX());
-    hs_ctmu_un->GetXaxis()->SetTitle("cos#theta_{#mu}");
-    hs_ctmu_un->GetYaxis()->SetTitle("Number of SBND Events");
-    hs_ctmu_un->Draw();
-
-    //Create stacked histogram for cos theta mu after smearing
-    THStack *hs_ctmu_sm = new THStack("hs_ctmu_sm","");
-    hs_ctmu_sm->Add(h_nc_sm->ProjectionX());
-    hs_ctmu_sm->Add(h_cccoh_sm->ProjectionX());
-    hs_ctmu_sm->Add(h_ccdis_sm->ProjectionX());
-    hs_ctmu_sm->Add(h_ccres_sm->ProjectionX());
-    hs_ctmu_sm->Add(h_ccqe_sm->ProjectionX());
-    hs_ctmu_sm->Add(h_ccmec_sm->ProjectionX());
-    hs_ctmu_sm->Draw("SAME");
-    canv->SaveAs("~/Documents/PhD/CrossSections/output/total/cosmu_total.root");
-    canv->Clear();
-*/
-    delete canv;
-/*
-    RooUnfoldBayes unfold(&response, hMeas, 4);
-    TH2D* hReco = (TH2D*)unfold.Hreco();
-    unfold.PrintTable(cout,hTrue);
-
-    TCanvas *c_Unf = new TCanvas("c_Unf", "", 800, 600);
-    c_Unf->Divide(2,4,0,0);
-
+    // Seperate the 2D histograms into their X (cos) and Y (Tmu) components
     TH1D* hTrainX; TH1D* hTrainY;
     TH1D* hTrainTrueX; TH1D* hTrainTrueY;
-    hTrainX = hTrain->ProjectionX(); hTrainY = hTrain->ProjectionY();
-    hTrainTrueX = hTrainTrue->ProjectionX(); hTrainTrueY = hTrainTrue->ProjectionY();
+    TH1D* hTrainFakeX; TH1D* hTrainFakeY;
+    hTrainX = hTrain->ProjectionX("px3",1,18); hTrainY = hTrain->ProjectionY("py3",1,20);
+    hTrainTrueX = hTrainTrue->ProjectionX("px4",1,18); hTrainTrueY = hTrainTrue->ProjectionY("py4",1,20);
+    hTrainFakeX = hTrainFake->ProjectionX("px5",1,18); hTrainFakeY = hTrainFake->ProjectionY("py5",1,20);
     TH1D* hRecoX; TH1D* hRecoY;
     hRecoX= hReco->ProjectionX(); hRecoY= hReco->ProjectionY();
     hRecoX->SetMarkerStyle(kFullDotLarge); hRecoY->SetMarkerStyle(kFullDotLarge);
     TH1D* hTrueX; TH1D* hTrueY;
     TH1D* hMeasX; TH1D* hMeasY;
-    hTrueX = hTrue->ProjectionX(); hTrueY = hTrue->ProjectionY();
-    hMeasX = hMeas->ProjectionX(); hMeasY = hMeas->ProjectionY();
+    hTrueX = hTrue->ProjectionX("px1",1,18); hTrueY = hTrue->ProjectionY("py1",1,20);
+    hMeasX = hMeas->ProjectionX("px2",1,18); hMeasY = hMeas->ProjectionY("py2",1,20);
 
-    c_Unf->cd(1);
+    TLegend *leg = new TLegend( 0.172, 0.704, 0.489, 0.88 );
+
+    canv->SetLeftMargin(0.15);
+    canv->SetRightMargin(0.1);
+
+    //Draw the cos theta mu distributions used for training
+    leg->AddEntry( hTrainTrueX, "Unsmeared Training", "l" );
+    leg->AddEntry( hTrainX, "Smeared Training", "l" );
+    leg->AddEntry( hTrainFakeX, "Fakes Training", "l" );
+    hTrainTrueX->GetYaxis()->SetTitle("Number of SBND Events");
+    hTrainTrueX->SetTitleOffset(1.0,"Y");
+    hTrainTrueX->SetTitleOffset(0.9,"X");
     hTrainTrueX->Draw();
     hTrainX->Draw("SAME");
-    c_Unf->cd(2);
-    hTrainTrueY->Draw();
-    hTrainY->Draw("SAME");
-    c_Unf->cd(3);
+    hTrainFakeX->Draw("SAME");
+    leg->Draw();
+    canv->SaveAs("~/Documents/PhD/CrossSections/output/unfolding/cosTrain.root");
+    canv->Clear();
+    leg->Clear();
+
+    // Draw the unfolded distributions for cos theta mu
+    leg->AddEntry( hTrueX, "Truth", "l" );
+    leg->AddEntry( hMeasX, "Measured", "l" );
+    leg->AddEntry( hRecoX, "Unfolded", "pl" );
+    hTrueX->GetYaxis()->SetTitle("Number of SBND Events");
+    hTrueX->SetTitleOffset(1.0,"Y");
+    hTrueX->SetTitleOffset(0.9,"X");
     hTrueX->Draw();
     hMeasX->Draw("SAME");
-    hRecoX->Draw("SAME");
-    c_Unf->cd(4);
+    hRecoX->SetLineWidth(1);
+    hRecoX->SetLineColor(kBlack);
+    hRecoX->SetMarkerSize(0.6);
+    hRecoX->Draw("E1 SAME");
+    leg->Draw();
+    canv->SaveAs("~/Documents/PhD/CrossSections/output/unfolding/cosUnfolded.root");
+    canv->Clear();
+    delete leg;
+
+    TLegend *leg2 = new TLegend( 0.554, 0.727, 0.872, 0.903 );
+
+    // Draw the Tmu distributions used for training
+    leg2->AddEntry( hTrainTrueY, "Unsmeared Training", "l" );
+    leg2->AddEntry( hTrainY, "Smeared Training", "l" );
+    leg2->AddEntry( hTrainFakeY, "Fakes Training", "l" );
+    hTrainTrueY->GetYaxis()->SetTitle("Number of SBND Events");
+    hTrainTrueY->SetTitleOffset(1.0,"Y");
+    hTrainTrueY->SetTitleOffset(0.9,"X");
+    hTrainTrueY->Draw();
+    hTrainY->Draw("SAME");
+    hTrainFakeY->Draw("SAME");
+    leg2->Draw();
+    canv->SaveAs("~/Documents/PhD/CrossSections/output/unfolding/TmuTrain.root");
+    canv->Clear();
+    leg2->Clear();
+
+    // Draw the unfolded distributions for Tmu
+    leg2->AddEntry( hTrueY, "Truth", "l" );
+    leg2->AddEntry( hMeasY, "Measured", "l" );
+    leg2->AddEntry( hRecoY, "Unfolded", "pl" );
+    hTrueY->GetYaxis()->SetTitle("Number of SBND Events");
+    hTrueY->SetTitleOffset(1.0,"Y");
+    hTrueY->SetTitleOffset(0.9,"X");
     hTrueY->Draw();
     hMeasY->Draw("SAME");
-    hRecoY->Draw("SAME");
-    c_Unf->cd(5);
-    hTrue->Draw("COLZ");
-    c_Unf->cd(6);
-    hMeas->Draw("COLZ");
-    c_Unf->cd(7);
-    hReco->Draw("COLZ");
+    hRecoY->SetLineWidth(1);
+    hRecoY->SetLineColor(kBlack);
+    hRecoY->SetMarkerSize(0.6);
+    hRecoY->Draw("E1 SAME");
+    leg2->Draw();
+    canv->SaveAs("~/Documents/PhD/CrossSections/output/unfolding/TmuUnfolded.root");
+    canv->Clear();
+    delete leg2;
 
-    c_Unf->SaveAs("unfolded.root");
-    delete c_Unf;
-*/
+    canv->SetLeftMargin(0.12);
+    canv->SetRightMargin(0.15);
+
+    // Draw the full truth distribution
+    hTrue->SetTitleOffset(0.75,"Y");
+    hTrue->Draw("COLZ");
+    canv->SaveAs("~/Documents/PhD/CrossSections/output/unfolding/Truth.root");
+    canv->Clear();
+
+    //Draw the full measured distribution
+    hMeas->SetTitleOffset(0.75,"Y");
+    hMeas->Draw("COLZ");
+    canv->SaveAs("~/Documents/PhD/CrossSections/output/unfolding/Measured.root");
+    canv->Clear();
+
+    // Draw the full unfolded distribution
+    hReco->SetTitleOffset(0.75,"Y");
+    hReco->Draw("COLZ");
+    canv->SaveAs("~/Documents/PhD/CrossSections/output/unfolding/Unfolded.root");
+    canv->Clear();
+
+    // Draw histogram of difference between truth and unfolded
+    TH2D *h_diff = new TH2D("h_diff","h_diff;cos#theta_{#mu};T_{#mu} (GeV)",20,-1,1,18,0,2);
+    h_diff->SetTitleOffset(0.75,"Y");
+    /*for (int i = 0; i<hTrue->GetNbinsX(); i++){
+      for (int j = 0; j<hTrue->GetNbinsY(); j++){
+        if (hReco->GetBinError(i,j)>0.001 && (hReco->GetBinContent(i,j)-hTrue->GetBinContent(i,j))!=0.0){
+          if (std::abs((hReco->GetBinContent(i,j)-hTrue->GetBinContent(i,j))/hReco->GetBinError(i,j))>1e3){
+           cout<<(hReco->GetBinContent(i,j)-hTrue->GetBinContent(i,j))/hReco->GetBinError(i,j)<<" "<<hReco->GetBinContent(i,j)<<" "<<hTrue->GetBinContent(i,j)<<" "<<hReco->GetBinError(i,j)<<endl;}
+          h_diff->SetBinContent(i,j,(hReco->GetBinContent(i,j)-hTrue->GetBinContent(i,j))/hReco->GetBinError(i,j));
+        }
+      }
+    }*/
+    h_diff->Add(hTrue,hReco,100.,-100.);
+    h_diff->Divide(hTrue);
+    h_diff->Draw("COLZ");
+    canv->SaveAs("~/Documents/PhD/CrossSections/output/unfolding/Difference.root");
+    canv->Clear();
+
+    TH2D* hCorr= CorrelationHist (unfold.Ereco((RooUnfold::ErrorTreatment)2),
+                          "corr", "Unfolded correlation matrix",
+                          response.Hresponse()->GetYaxis()->GetXmin(),
+                          response.Hresponse()->GetYaxis()->GetXmax());
+    hCorr->Draw("COLZ");
+    canv->SaveAs("~/Documents/PhD/CrossSections/output/unfolding/Covariance.root");
+    delete canv;
+
+    v_unf.push_back(hReco);
+
 }
 
 // -------------------------------------------------------------------------
 //                             Slicing function
 // -------------------------------------------------------------------------
-void Slices ( TH2D *h_unsmeared, TH2D *h_smeared ){
+void Slices ( TH2D *h_unsmeared, TH2D *h_smeared, std::vector<TH2*> v_unf ){
 
     // Firstly, loop over all Tmu bins on draw slices in cos theta mu
     // Take the bin edges to be the title
@@ -731,9 +1024,11 @@ void Slices ( TH2D *h_unsmeared, TH2D *h_smeared ){
 
     TH1D *h_Tmu      = new TH1D ( "h_Tmu", "", x_bins, -1, 1 );
     TH1D *h_Tmu_sm   = new TH1D ( "h_Tmu_sm", "", x_bins, -1, 1 );
+    TH1D *h_Tmu_unf  = new TH1D ( "h_Tmu_unf", "", x_bins, -1, 1 );
     
     leg_T->AddEntry( h_Tmu, " Unsmeared ", "l" );
     leg_T->AddEntry( h_Tmu_sm, " Smeared ", "l" );
+    leg_T->AddEntry( h_Tmu_unf, " Unfolded ", "pl" );
     
     for ( int i = 1; i <= y_bins; ++i ){
 
@@ -776,15 +1071,21 @@ void Slices ( TH2D *h_unsmeared, TH2D *h_smeared ){
         for ( int j = 1; j <= x_bins; ++j ){
             h_Tmu->SetBinContent( j, h_unsmeared->GetBinContent(j, i) );
             h_Tmu_sm->SetBinContent( j, h_smeared->GetBinContent(j, i) );
+            h_Tmu_unf->SetBinContent( j, v_unf[0]->GetBinContent(j, i) );
         }
 
         h_Tmu->Draw();
         h_Tmu_sm->Draw("same");
+        h_Tmu_unf->Draw("E1 same");
         h_Tmu->SetTitle(hist_name);
         h_Tmu->GetXaxis()->SetTitle("cos#theta_{#mu}");   
         h_Tmu->GetYaxis()->SetTitle("Number of SBND events");   
         h_Tmu->SetLineColor( kRed + 2 );
         h_Tmu_sm->SetLineColor( kGreen + 2 );
+        h_Tmu_unf->SetLineWidth(1);
+        h_Tmu_unf->SetLineColor(kBlack);
+        h_Tmu_unf->SetMarkerStyle(20);
+        h_Tmu_unf->SetMarkerSize(0.6);
 
         leg_T->Draw();
         c_Tmu->Print(file_name);
@@ -793,6 +1094,7 @@ void Slices ( TH2D *h_unsmeared, TH2D *h_smeared ){
    
     delete h_Tmu;
     delete h_Tmu_sm;
+    delete h_Tmu_unf;
 
     delete c_Tmu;
     
@@ -804,9 +1106,13 @@ void Slices ( TH2D *h_unsmeared, TH2D *h_smeared ){
 
     TH1D *h_cosmu    = new TH1D ( "h_cosmu", "", y_bins, 0, 2 );
     TH1D *h_cosmu_sm = new TH1D ( "h_cosmu_sm", "", y_bins, 0, 2 );
+    TH1D *h_cosmu_unf = new TH1D ( "h_cosmu_unf", "", y_bins, 0, 2 );
      
     leg_c->AddEntry( h_cosmu, " Unsmeared ", "l" );
     leg_c->AddEntry( h_cosmu_sm, " Smeared ", "l" );
+    leg_c->AddEntry( h_cosmu_unf, " Unfolded ", "pl" );
+
+    double cmu_tot = 0;
     
     // Cos theta mu slices
     for ( int i = 1; i <= x_bins; ++i ){
@@ -850,6 +1156,7 @@ void Slices ( TH2D *h_unsmeared, TH2D *h_smeared ){
         for ( int j = 1; j <= y_bins; ++j ){
             h_cosmu->SetBinContent( j, h_unsmeared->GetBinContent(i, j) );
             h_cosmu_sm->SetBinContent( j, h_smeared->GetBinContent(i, j) );
+            h_cosmu_unf->SetBinContent( j, v_unf[0]->GetBinContent(i, j) );
         }
 
         h_cosmu->SetTitle(hist_name1);
@@ -859,6 +1166,11 @@ void Slices ( TH2D *h_unsmeared, TH2D *h_smeared ){
         h_cosmu_sm->SetLineColor( kGreen + 2 );
         h_cosmu->Draw();
         h_cosmu_sm->Draw("same");
+        h_cosmu_unf->Draw("E1 same");
+        h_cosmu_unf->SetLineWidth(1);
+        h_cosmu_unf->SetLineColor(kBlack);
+        h_cosmu_unf->SetMarkerStyle(20);
+        h_cosmu_unf->SetMarkerSize(0.6);
 
         leg_c->Draw();
         c_cosmu->SaveAs(file_name1);
@@ -877,7 +1189,7 @@ void Slices ( TH2D *h_unsmeared, TH2D *h_smeared ){
 // -------------------------------------------------------------------------
 //                  Stacked histogram slicing function
 // -------------------------------------------------------------------------
-void SliceStack ( std::vector<TH2*> v_un, std::vector<TH2*> v_sm, std::vector<TH2*> v_sm_rec){
+void SliceStack ( std::vector<TH2*> v_un, std::vector<TH2*> v_sm, std::vector<TH2*> v_sm_rec, std::vector<TH2*> v_unf){
 
     TCanvas *canvas1 = new TCanvas ( "canvas1", "", 800, 600 );
 
@@ -892,17 +1204,17 @@ void SliceStack ( std::vector<TH2*> v_un, std::vector<TH2*> v_sm, std::vector<TH
 
     for ( int j = 1; j < x_bins+1; j++ ){
 
-      StackProjectionY(v_un, unsmeared_labs, "un_Tmu_cosmuRange:", j, canvas1);
-      StackProjectionY(v_sm, smeared_labs, "sm_Tmu_cosmuRange:", j, canvas1);
-      StackProjectionY(v_sm_rec, reco_labs, "rec_sm_Tmu_cosmuRange:", j, canvas1);
+      StackProjectionY(v_un, unsmeared_labs, "un_Tmu_cosmuRange:", j, canvas1, v_unf[0], 1);
+      StackProjectionY(v_sm, smeared_labs, "sm_Tmu_cosmuRange:", j, canvas1, v_unf[0], 0);
+      StackProjectionY(v_sm_rec, reco_labs, "rec_sm_Tmu_cosmuRange:", j, canvas1, v_unf[0], 0);
 
     }
 
     for ( int j = 1; j < y_bins+1; j++ ){
 
-      StackProjectionX(v_un, unsmeared_labs, "un_cosmu_TmuRange:", j, canvas1);
-      StackProjectionX(v_sm, smeared_labs, "sm_cosmu_TmuRange:", j, canvas1);
-      StackProjectionX(v_sm_rec, reco_labs, "rec_sm_cosmu_TmuRange:", j, canvas1);
+      StackProjectionX(v_un, unsmeared_labs, "un_cosmu_TmuRange:", j, canvas1, v_unf[0], 1);
+      StackProjectionX(v_sm, smeared_labs, "sm_cosmu_TmuRange:", j, canvas1, v_unf[0], 0);
+      StackProjectionX(v_sm_rec, reco_labs, "rec_sm_cosmu_TmuRange:", j, canvas1, v_unf[0], 0);
 
     }
 
