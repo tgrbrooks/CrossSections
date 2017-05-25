@@ -40,6 +40,9 @@
 #include "TRandom.h"
 #include "RooUnfoldResponse.h"
 #include "RooUnfoldBayes.h"
+#include "RooUnfoldSvd.h"
+#include "RooUnfoldTUnfold.h"
+#include "RooUnfoldBinByBin.h"
 #include "RooUnfold.h"
 
 // -------------------------------------------------------------------------
@@ -49,14 +52,17 @@
 // -------------------------------------------------------------------------
 
 void Smear ( TTree *tree,
-             TTree *traintree,
              TH2D *h_smeared,
              std::vector<TH2*> &v_un,
              std::vector<TH2*> &v_sm,
              std::vector<TH2*> &v_sm_rec,
-             std::vector<TH2*> &v_unf,
              double scalar_norm); 
 
+void Unfold ( TTree *traintree,
+              TH2D *hMeas,
+              TH2D *hTrue,
+              std::vector<TH2*> &v_unf,
+              std::string method);
 
 // -------------------------------------------------------------------------
 // Slices function:

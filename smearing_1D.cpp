@@ -12,7 +12,7 @@
  *
 */
 
-#include "smearing.h"
+#include "smearing_1D.h"
 
 using namespace std;
 
@@ -261,22 +261,50 @@ void TestSmearing(double cos, double tmu) {
 
 }
 
-TH1D* ReBin(TH2D* twoDhist){
+// Function to transform a 2D histogram into a 1D hist
+TH1D* ReBin(const char *name,TH2D* twoDhist){
 
   int xbins = twoDhist->GetNbinsX();
   int ybins = twoDhist->GetNbinsY();
   int newbins = xbins*ybins;
-  TH1D* newhist = new TH1D("newhist","",newbins,0,newbins-1);
-  for(int i=0;i<xbins;++i){
-    for(int j=0;j<ybins;++j){
-      newhist->SetBinContent(18*i+j,twoDhist->GetBinContent(i,j));
+  TH1D* newhist = new TH1D(name,"",newbins,0,newbins);
+  // Start from 1, as 0 is underflow bin
+  for(int i=1;i<=xbins;++i){
+    for(int j=1;j<=ybins;++j){
+      newhist->SetBinContent(18*(i-1)+j,twoDhist->GetBinContent(i,j));
     }
   }
   return newhist;
 
 }
 
-int smearing() {
+// Function to transform 1D hist back into a 2D hist
+TH2D* UnReBin(const char *name, TH1D* oneDhist){
+
+  TH2D* newhist = new TH2D(name,"",20,-1,1,18,0,2);
+  for(int i=1; i<=20; ++i){
+    for(int j=1; j<=18; ++j){
+      newhist->SetBinContent(i,j,oneDhist->GetBinContent(18*(i-1)+j));
+    }
+  }
+  return newhist;
+
+}
+
+// Function to map pair of cos theta and Tmu to 1D bin
+int MapTo1D(double cos, double tmu){
+
+  double cos_width = 2./20.; 
+  double tmu_width = 2./18.;
+  int i = ceil((1.+cos)/cos_width); //Cos theta 2D bin
+  int j = ceil(tmu/tmu_width); //Tmu 2D bin
+  int bin = 18.*(i-1.)+j; //Transform to 1D bin
+  if(tmu<=2.) return bin;
+  else return 361;
+
+}
+
+int smearing_1D() {
 
     gErrorIgnoreLevel = kWarning;
 
@@ -318,7 +346,10 @@ int smearing() {
     
     // Number of MiniBooNE bins (data) 
     // costhetamu : 20
+    int cos_nbins = 20; double cos_min = -1.; double cos_max = 1.;
     // Tmu        : 18
+    int tmu_nbins = 18; double tmu_min = 0.; double tmu_max = 2.;
+
     // 
     // Amount to smear 
     // costhetamu : 5 degrees
@@ -333,13 +364,6 @@ int smearing() {
     // -------------------------------------------------------------------------
     TTree *def_tree = (TTree*) f1.Get( "gst" );
     TTree *train_tree = (TTree*) f2.Get( "gst" );
- 
-    // Define the log and normal histograms for the unsmeared distributions
-    // El - m_mu : kinetic energy of the final state primary lepton (fspl : muon == 13 )
-    // cthl      : costheta of the final state primary lepton
-    // h_un      : unsmeared histogram
-    // h_sm      : smeared histogram
-    //
 
     TH2D *h_un = new TH2D("h_un"," T_{#mu} - cos#theta_{#mu} distribution before smearing ",20,-1,1,18,0,2);
     def_tree->Draw("( El - 0.10566 ):cthl>>h_un","fspl == 13 && cc","colz"); 
@@ -365,9 +389,17 @@ int smearing() {
     can->SaveAs("~/Documents/PhD/CrossSections/output/total/unsmeared.root");
 
     can->Clear();
-    TH1D* h_un_rb = ReBin(h_un);
+    TH1D* h_un_rb = ReBin("h_un_rb",h_un);
     h_un_rb->Draw();
     can->SaveAs("~/Documents/PhD/CrossSections/output/rbtest.root");
+    can->Clear();
+    TH2D* h_un_urb = UnReBin("h_un_urb",h_un_rb);
+    h_un_urb->Draw("COLZ");
+    can->SaveAs("~/Documents/PhD/CrossSections/output/urbtest.root");
+    can->Clear();
+    h_un_urb->Divide(h_un);
+    h_un_urb->Draw("COLZ");
+    can->SaveAs("~/Documents/PhD/CrossSections/output/urbtest_div.root");
 
     delete can;
 
@@ -380,7 +412,10 @@ int smearing() {
     TH2D *h_sm = new TH2D("h_sm"," T_{#mu} - cos#theta_{#mu} distribution after smearing, impurity ",20,-1,1,18,0,2);
     
     // Take h_un and smear it
-    Smear(def_tree, train_tree, h_sm, v_un, v_sm, v_sm_rec, v_unf, scalar_norm);
+    Smear(def_tree, h_sm, v_un, v_sm, v_sm_rec, scalar_norm);
+
+    // Method can be "bayes", "svd" or "tunfold"
+    Unfold(train_tree, h_sm, h_un, v_unf, "svd");
 
     // The the 2 2D histograms and draw slices in Tmu and cos theta mu
     Slices( h_un, h_sm, v_unf );
@@ -446,12 +481,10 @@ int smearing() {
 // -------------------------------------------------------------------------
 
 void Smear ( TTree *tree, 
-             TTree *traintree,
              TH2D  *h_smeared, 
              std::vector<TH2*> &v_un,
              std::vector<TH2*> &v_sm,
              std::vector<TH2*> &v_sm_rec,
-             std::vector<TH2*> &v_unf,
              double scalar_norm){
 
     TCanvas *canv = new TCanvas("canv","",800,600);
@@ -464,135 +497,9 @@ void Smear ( TTree *tree,
     _random_gen->SetSeed( time( NULL ) );
 
     TRandom *_rand = new TRandom( time( NULL ) );
-
-    TH2D *hTrainTrue= new TH2D ("traintrue", "Training Truth;cos#theta_{#mu};T_{#mu} (GeV)", 20, -1, 1, 18, 0, 2);
-    hTrainTrue->SetLineColor(kRed + 2);
-    TH2D *hTrain= new TH2D ("train", "Training Measured;cos#theta_{#mu};T_{#mu} (GeV)", 20, -1, 1, 18, 0, 2);
-    hTrain->SetLineColor(kGreen + 2);
-    TH2D *hTrainFake= new TH2D ("trainfake", "Training Fakes;cos#theta_{#mu};T_{#mu} (GeV)", 20, -1, 1, 18, 0, 2);
-    RooUnfoldResponse response(hTrain, hTrainTrue);
-    TH2D *hTrue = new TH2D("true", "Test Truth;cos#theta_{#mu};T_{#mu} (GeV)", 20, -1, 1, 18, 0, 2);
-    hTrue->SetLineColor(kRed + 2);
-    TH2D *hMeas = new TH2D("meas", "Test Measured;cos#theta_{#mu};T_{#mu} (GeV)", 20, -1 ,1, 18, 0, 2);
-    hMeas->SetLineColor(kGreen + 2);
-/*
-    //Train on a flat distribution
-    for (int i = 0; i<1000000; i++){
-      double costheta = _rand->Uniform(-1,1);
-      double tmu = _rand->Uniform(0,2);
-      double costheta_sm = SmearCosTheta(costheta,_random_gen);
-      double tmu_sm = SmearKE(tmu,_random_gen);
-      hTrainTrue->Fill(costheta,tmu);
-      if(tmu>0.05){
-        hTrain->Fill(costheta_sm,tmu_sm);
-        response.Fill(costheta_sm,tmu_sm,costheta,tmu);
-      }
-      else response.Miss(costheta,tmu);
-    }
-*/
-
-    //Train on events generated without MEC
-    // Get the branches
-    TBranch *bt_nf    = traintree->GetBranch( "nf" );
-    TBranch *bt_nfp   = traintree->GetBranch( "nfp" );
-    TBranch *bt_cthl  = traintree->GetBranch( "cthl" );
-    TBranch *bt_El    = traintree->GetBranch( "El" );
-    TBranch *bt_pl    = traintree->GetBranch( "pl" );
-    TBranch *bt_fspl  = traintree->GetBranch( "fspl" );
-    TBranch *bt_cthf  = traintree->GetBranch( "cthf" );
-    TBranch *bt_Ef    = traintree->GetBranch( "Ef" );
-    //TBranch *bt_pf    = traintree->GetBranch( "pf" );
-    TBranch *bt_pdgf  = traintree->GetBranch( "pdgf" );
-    TBranch *bt_cc    = traintree->GetBranch( "cc" );
-    TBranch *bt_nc    = traintree->GetBranch( "nc" );
-    
-    // Number of events in the TTree
-    int nt_values = traintree->GetEntries();
    
     double m_mu = 0.10566; // Muon mass, GeV
     double m_pi = 0.13957; // Charged pion mass, GeV
-
-    // Loop over the entries of the tree and calculate the kinetic energies 
-    // of the muons and pions and define the impurity
-    for ( int i = 0; i < nt_values; ++i ){
-        
-        traintree->GetEntry(i);
-     
-        double T_mu, e_mu;
-
-        // Get values from the branches
-        int nf   = bt_nf->GetLeaf("nf")->GetValue();
-        int nfp  = bt_nfp->GetLeaf("nfp")->GetValue();
-        double fspl  = bt_fspl->GetLeaf( "fspl" )->GetValue(); 
-        double cc    = bt_cc->GetLeaf( "cc" )->GetValue(); 
-        double nc    = bt_nc->GetLeaf( "nc" )->GetValue(); 
-        double El    = bt_El->GetLeaf( "El" )->GetValue();
-        double pl    = bt_pl->GetLeaf( "pl" )->GetValue();
-        double cthl  = bt_cthl->GetLeaf( "cthl" )->GetValue();
-
-        // Kinetic energy of the final state primary lepton
-        T_mu = El - m_mu;
-
-        //Count the CC numu event types before smearing
-        if ( fspl == 13 && cc == 1 ) {
-
-          double cthl_smeared = SmearCosTheta(cthl,_random_gen);
-          double T_mu_smeared = SmearKE(T_mu,_random_gen);
-
-          hTrainTrue->Fill(cthl,T_mu);
-
-          //Count the CC numu event types after smearing
-          if ( T_mu > 0.05 ){
- 
-            hTrain->Fill(cthl_smeared, T_mu_smeared);
-            response.Fill(cthl_smeared, T_mu_smeared, cthl, T_mu);
-          }
-          else {
-            response.Miss(cthl, T_mu);
-          }
-        }
-
-        // Find NCnpi events
-        if ( nc == 1 ){ 
-
-          double prev_e_pi = 0;
-          double prev_cos_pi = 0;
-
-          //Loop over all the final state hadronic particles
-          for (int j = 0; j<nf; ++j) {
-
-            bt_pdgf->GetEntry(i);
-            bt_cthf->GetEntry(i);
-            bt_Ef->GetEntry(i);
-
-            int pdgf = bt_pdgf->GetLeaf("pdgf")->GetValue(j);
-            double e_pi = bt_Ef->GetLeaf("Ef")->GetValue(j);
-            double cos_pi = bt_cthf->GetLeaf("cthf")->GetValue(j);
-
-            // If one of the hadrons is a pion use a random number to check if it is misidentified
-            if (pdgf == 211 || pdgf == -211){
-              int random;
-              random = rand() % 5 + 1; // CHANGE FROM 20% TO 2%
-              // If more than one is misidentified assume the higher energy one is muon
-              if ( random == 5 && e_pi > prev_e_pi ) {
-                prev_e_pi = e_pi;
-                prev_cos_pi = cos_pi;
-              }
-            }
-          }
-          //Kinetic energy
-          double T_pi = prev_e_pi - m_pi;
-          // If at least one pion is misidentified and it has a high enough energy to be detected record it as a muon
-          if( prev_e_pi != 0 && T_pi > 0.05){
-            //Smear the pion energy and angle
-            double cos_pi_smeared = SmearCosTheta(prev_cos_pi,_random_gen);
-            double T_pi_smeared = SmearKE(T_pi,_random_gen);
-            hTrain->Fill(cos_pi_smeared, T_pi_smeared);
-            hTrainFake->Fill(cos_pi_smeared, T_pi_smeared);
-            response.Fake(cos_pi_smeared, T_pi_smeared);
-          }
-        }
-    }
 
     // Stacked unsmeared histogram - truth variables
     THStack *hs_un = new THStack("hs_un","Stacked Histograms;cos#theta_{#mu};T_{#mu} (GeV)");
@@ -631,11 +538,9 @@ void Smear ( TTree *tree,
     TBranch *b_nfp   = tree->GetBranch( "nfp" );
     TBranch *b_cthl  = tree->GetBranch( "cthl" );
     TBranch *b_El    = tree->GetBranch( "El" );
-    //TBranch *b_pl    = tree->GetBranch( "pl" );
     TBranch *b_fspl  = tree->GetBranch( "fspl" );
     TBranch *b_cthf  = tree->GetBranch( "cthf" );
     TBranch *b_Ef    = tree->GetBranch( "Ef" );
-    //TBranch *b_pf    = tree->GetBranch( "pf" );
     TBranch *b_pdgf  = tree->GetBranch( "pdgf" );
     TBranch *b_cc    = tree->GetBranch( "cc" );
     TBranch *b_nc    = tree->GetBranch( "nc" );
@@ -683,7 +588,6 @@ void Smear ( TTree *tree,
         double nfpim = b_nfpim->GetLeaf( "nfpim" )->GetValue();
         double nfpi0 = b_nfpi0->GetLeaf( "nfpi0" )->GetValue();
         double El    = b_El->GetLeaf( "El" )->GetValue();
-        //double pl    = b_pl->GetLeaf( "pl" )->GetValue();
         double cthl  = b_cthl->GetLeaf( "cthl" )->GetValue();
         double qel   = b_qel->GetLeaf( "qel" )->GetValue();
         double res   = b_res->GetLeaf( "res" )->GetValue();
@@ -708,8 +612,6 @@ void Smear ( TTree *tree,
 
           double cthl_smeared = SmearCosTheta(cthl,_random_gen);
           double T_mu_smeared = SmearKE(T_mu,_random_gen);
-
-          hTrue->Fill(cthl,T_mu);
 
           //Count the CC numu event types after smearing
           if ( T_mu > 0.05 ){
@@ -738,7 +640,6 @@ void Smear ( TTree *tree,
             h_smeared->Fill(cthl_smeared, T_mu_smeared);
             ccinc_count_sm++;
 
-            hMeas->Fill(cthl_smeared,T_mu_smeared);
           }
         }
 
@@ -782,8 +683,6 @@ void Smear ( TTree *tree,
             h_nc_sm->Fill(cos_pi_smeared, T_pi_smeared);
             h_smeared->Fill(cos_pi_smeared, T_pi_smeared);
             imp_count++;
-
-            hMeas->Fill(cos_pi_smeared, T_pi_smeared);
 
             if ( nfpip+nfpim==1 ){ h_nc1pi_sm->Fill(cos_pi_smeared,T_pi_smeared); }
             else { h_ncother_sm->Fill(cos_pi_smeared,T_pi_smeared); }
@@ -907,10 +806,182 @@ void Smear ( TTree *tree,
     canv->SaveAs("~/Documents/PhD/CrossSections/output/total/reco_stacked.root");
     canv->Clear();
 
+}
+
+void Unfold(TTree *traintree, TH2D *hMeas, TH2D *hTrue, std::vector<TH2*> &v_unf, std::string method){
+
+    TCanvas *canv = new TCanvas("canv","",800,600);
+    canv->SetLeftMargin(0.12);
+    canv->SetRightMargin(0.15);
+
+    // Initiate the random number generation
+    ROOT::Math::GSLRngMT *_random_gen = new ROOT::Math::GSLRngMT;
+    _random_gen->Initialize();    
+    _random_gen->SetSeed( time( NULL ) );
+
+    TRandom *_rand = new TRandom( time( NULL ) );
+
+    TH2D *hTrainTrue= new TH2D ("traintrue", "Training Truth;cos#theta_{#mu};T_{#mu} (GeV)", 20, -1, 1, 18, 0, 2);
+    hTrainTrue->SetLineColor(kRed + 2);
+    TH2D *hTrain= new TH2D ("train", "Training Measured;cos#theta_{#mu};T_{#mu} (GeV)", 20, -1, 1, 18, 0, 2);
+    hTrain->SetLineColor(kGreen + 2);
+    TH2D *hTrainFake= new TH2D ("trainfake", "Training Fakes;cos#theta_{#mu};T_{#mu} (GeV)", 20, -1, 1, 18, 0, 2);
+    TH1D *hSize = ReBin("hSize",hTrain);
+
+    TH1D *hTrainTrue_1D= new TH1D ("traintrue1D", "Training Truth;cos#theta_{#mu};T_{#mu} (GeV)", 360, 0, 360);
+    hTrainTrue_1D->SetLineColor(kRed + 2);
+    TH1D *hTrain_1D= new TH1D ("train1D", "Training Measured;cos#theta_{#mu};T_{#mu} (GeV)", 360, 0, 360);
+    //TH1D* hTrain_1D = ReBin("train1D",hTrain);
+    hTrain_1D->SetLineColor(kGreen + 2);
+    TH1D *hTrainFake_1D= new TH1D ("trainfake1D", "Training Fakes;cos#theta_{#mu};T_{#mu} (GeV)", 360, 0, 360);
+
+    RooUnfoldResponse response(hSize,hSize);
+    hTrue->SetLineColor(kRed + 2);
+    hMeas->SetLineColor(kGreen + 2);
+
+    //Train on events generated without MEC
+    // Get the branches
+    TBranch *bt_nf    = traintree->GetBranch( "nf" );
+    TBranch *bt_nfp   = traintree->GetBranch( "nfp" );
+    TBranch *bt_cthl  = traintree->GetBranch( "cthl" );
+    TBranch *bt_El    = traintree->GetBranch( "El" );
+    TBranch *bt_pl    = traintree->GetBranch( "pl" );
+    TBranch *bt_fspl  = traintree->GetBranch( "fspl" );
+    TBranch *bt_cthf  = traintree->GetBranch( "cthf" );
+    TBranch *bt_Ef    = traintree->GetBranch( "Ef" );
+    TBranch *bt_pdgf  = traintree->GetBranch( "pdgf" );
+    TBranch *bt_cc    = traintree->GetBranch( "cc" );
+    TBranch *bt_nc    = traintree->GetBranch( "nc" );
+    
+    // Number of events in the TTree
+    int nt_values = traintree->GetEntries();
+   
+    double m_mu = 0.10566; // Muon mass, GeV
+    double m_pi = 0.13957; // Charged pion mass, GeV
+
+
+    // Loop over the entries of the tree and calculate the kinetic energies 
+    // of the muons and pions and define the impurity
+    for ( int i = 0; i < nt_values; ++i ){
+        
+        traintree->GetEntry(i);
+     
+        double T_mu, e_mu;
+
+        // Get values from the branches
+        int nf   = bt_nf->GetLeaf("nf")->GetValue();
+        int nfp  = bt_nfp->GetLeaf("nfp")->GetValue();
+        double fspl  = bt_fspl->GetLeaf( "fspl" )->GetValue(); 
+        double cc    = bt_cc->GetLeaf( "cc" )->GetValue(); 
+        double nc    = bt_nc->GetLeaf( "nc" )->GetValue(); 
+        double El    = bt_El->GetLeaf( "El" )->GetValue();
+        double pl    = bt_pl->GetLeaf( "pl" )->GetValue();
+        double cthl  = bt_cthl->GetLeaf( "cthl" )->GetValue();
+
+        // Kinetic energy of the final state primary lepton
+        T_mu = El - m_mu;
+
+        //Count the CC numu event types before smearing
+        if ( fspl == 13 && cc == 1 ) {
+
+          double cthl_smeared = SmearCosTheta(cthl,_random_gen);
+          double T_mu_smeared = SmearKE(T_mu,_random_gen);
+
+          hTrainTrue->Fill(cthl,T_mu);
+          hTrainTrue_1D->Fill(MapTo1D(cthl,T_mu)-0.5);
+
+          //Count the CC numu event types after smearing
+          if ( T_mu > 0.05 ){
+ 
+            hTrain->Fill(cthl_smeared, T_mu_smeared);
+            hTrain_1D->Fill(MapTo1D(cthl_smeared,T_mu_smeared)-0.5);
+            response.Fill(MapTo1D(cthl_smeared, T_mu_smeared)-0.5, MapTo1D(cthl, T_mu)-0.5);
+          }
+          else {
+            response.Miss(MapTo1D(cthl, T_mu)-0.5);
+          }
+        }
+        // Find NCnpi events
+        if ( nc == 1 ){ 
+
+          double prev_e_pi = 0;
+          double prev_cos_pi = 0;
+
+          //Loop over all the final state hadronic particles
+          for (int j = 0; j<nf; ++j) {
+
+            bt_pdgf->GetEntry(i);
+            bt_cthf->GetEntry(i);
+            bt_Ef->GetEntry(i);
+
+            int pdgf = bt_pdgf->GetLeaf("pdgf")->GetValue(j);
+            double e_pi = bt_Ef->GetLeaf("Ef")->GetValue(j);
+            double cos_pi = bt_cthf->GetLeaf("cthf")->GetValue(j);
+
+            // If one of the hadrons is a pion use a random number to check if it is misidentified
+            if (pdgf == 211 || pdgf == -211){
+              int random;
+              random = rand() % 5 + 1; // CHANGE FROM 20% TO 2%
+              // If more than one is misidentified assume the higher energy one is muon
+              if ( random == 5 && e_pi > prev_e_pi ) {
+                prev_e_pi = e_pi;
+                prev_cos_pi = cos_pi;
+              }
+            }
+          }
+          //Kinetic energy
+          double T_pi = prev_e_pi - m_pi;
+          // If at least one pion is misidentified and it has a high enough energy to be detected record it as a muon
+          if( prev_e_pi != 0 && T_pi > 0.05){
+            //Smear the pion energy and angle
+            double cos_pi_smeared = SmearCosTheta(prev_cos_pi,_random_gen);
+            double T_pi_smeared = SmearKE(T_pi,_random_gen);
+            hTrain->Fill(cos_pi_smeared, T_pi_smeared);
+            hTrain_1D->Fill(MapTo1D(cos_pi_smeared, T_pi_smeared)-0.5);
+            hTrainFake->Fill(cos_pi_smeared, T_pi_smeared);
+            hTrainFake_1D->Fill(MapTo1D(cos_pi_smeared,T_pi_smeared)-0.5);
+            response.Fake(MapTo1D(cos_pi_smeared, T_pi_smeared)-0.5);
+          }
+        }
+    }
+
+    TH1D *hMeas_1D = ReBin("hMeas_1D",hMeas);
+    TH1D *hTrue_1D = ReBin("hTrue_1D",hTrue);
+
+    hTrue_1D->Draw();
+    hTrain_1D->Draw("SAME");
+    canv->SaveAs("~/Documents/PhD/CrossSections/output/unfolding/bintest.root");
+    canv->Clear();
+
     // Do the unfolding
-    RooUnfoldBayes unfold(&response, hMeas, 10);
-    TH2D* hReco = (TH2D*)unfold.Hreco((RooUnfold::ErrorTreatment)2);
+    std::vector<TH1D*> vReco;
+    if (method == "bayes"){
+      cout<<"Using the iterative bayesian method"<<endl;
+      RooUnfoldBayes unfold(&response, hMeas_1D, 10);
+      TH1D* hReco_1D = (TH1D*)unfold.Hreco((RooUnfold::ErrorTreatment)2);
+      vReco.push_back(hReco_1D);
+    }
+    else if (method == "svd"){
+      cout<<"Using singular value decomposition"<<endl;
+      RooUnfoldSvd unfold(&response, hMeas_1D, 2);
+      TH1D* hReco_1D = (TH1D*)unfold.Hreco();
+      vReco.push_back(hReco_1D);
+    }
+    else if (method == "tunfold"){
+      cout<<"Using TUnfold"<<endl;
+      RooUnfoldTUnfold unfold(&response, hMeas_1D);
+      TH1D* hReco_1D = (TH1D*)unfold.Hreco((RooUnfold::ErrorTreatment)2);
+      vReco.push_back(hReco_1D);
+    }
+    else{
+      cout<<"Unfolding method not recognised: Using bin by bin method"<<endl;
+      RooUnfoldBinByBin unfold(&response, hMeas_1D);
+      TH1D* hReco_1D = (TH1D*)unfold.Hreco();
+      vReco.push_back(hReco_1D);
+    }
+    
     //unfold.PrintTable(cout,hTrue);
+    TH2D* hReco = UnReBin("hReco",vReco[0]);
 
     // Seperate the 2D histograms into their X (cos) and Y (Tmu) components
     TH1D* hTrainX; TH1D* hTrainY;
@@ -1024,21 +1095,12 @@ void Smear ( TTree *tree,
     // Draw histogram of difference between truth and unfolded
     TH2D *h_diff = new TH2D("h_diff","h_diff;cos#theta_{#mu};T_{#mu} (GeV)",20,-1,1,18,0,2);
     h_diff->SetTitleOffset(0.75,"Y");
-    /*for (int i = 0; i<hTrue->GetNbinsX(); i++){
-      for (int j = 0; j<hTrue->GetNbinsY(); j++){
-        if (hReco->GetBinError(i,j)>0.001 && (hReco->GetBinContent(i,j)-hTrue->GetBinContent(i,j))!=0.0){
-          if (std::abs((hReco->GetBinContent(i,j)-hTrue->GetBinContent(i,j))/hReco->GetBinError(i,j))>1e3){
-           cout<<(hReco->GetBinContent(i,j)-hTrue->GetBinContent(i,j))/hReco->GetBinError(i,j)<<" "<<hReco->GetBinContent(i,j)<<" "<<hTrue->GetBinContent(i,j)<<" "<<hReco->GetBinError(i,j)<<endl;}
-          h_diff->SetBinContent(i,j,(hReco->GetBinContent(i,j)-hTrue->GetBinContent(i,j))/hReco->GetBinError(i,j));
-        }
-      }
-    }*/
     h_diff->Add(hTrue,hReco,100.,-100.);
     h_diff->Divide(hTrue);
     h_diff->Draw("COLZ");
     canv->SaveAs("~/Documents/PhD/CrossSections/output/unfolding/Difference.root");
     canv->Clear();
-
+/*
     TH2D* hCorr= CorrelationHist (unfold.Ereco((RooUnfold::ErrorTreatment)2),
                           "corr", "Unfolded correlation matrix",
                           response.Hresponse()->GetYaxis()->GetXmin(),
@@ -1046,7 +1108,7 @@ void Smear ( TTree *tree,
     hCorr->Draw("COLZ");
     canv->SaveAs("~/Documents/PhD/CrossSections/output/unfolding/Covariance.root");
     delete canv;
-
+*/
     v_unf.push_back(hReco);
 
 }
