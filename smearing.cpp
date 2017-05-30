@@ -37,6 +37,36 @@ double SmearKE(double ke, ROOT::Math::GSLRngMT *_random_gen){
   return lognorm;
 }
 
+double McsSmear(double ke, ROOT::Math::GSLRngMT *_random_gen){
+
+  //For exiting muons use multiple coulomb scattering bias and resolution
+  //Values from Fig 5 of https://arxiv.org/pdf/1703.06187.pdf
+  double bias[] = {0.0273,0.0409,0.0352,0.0250,0.0227,0.0068,0.0364,0.0273,0.0227};
+  double resolution[] = {0.127,0.145,0.143,0.141,0.164,0.177,0.250,0.266,0.341};
+  int pos = 8;
+  for(int i=0; i<9; i++){
+    if(ke<(0.33+0.186*(i+1))) pos = i;
+  }
+  double ke_smear = ke + _random_gen->Gaussian(resolution[pos]*ke)+bias[pos]*ke;
+  if(ke_smear<0) ke_smear = 0;
+  return ke_smear;
+}
+
+double RangeSmear(double ke, ROOT::Math::GSLRngMT *_random_gen){
+
+  //For contained muons use range based bias and resolution
+  //Values from Fig 12 of https://arxiv.org/pdf/1703.06187.pdf
+  double bias[] = {-0.0035,-0.0059,-0.0047,-0.0059,-0.0035,-0.0029,-0.0076,-0.0059,0.0006};
+  double resolution[] = {0.017,0.021,0.023,0.026,0.025,0.030,0.030,0.040,0.032};
+  int pos = 8;
+  for(int i=0; i<9; i++){
+    if(ke<(0.34+0.41*(i+1))) pos = i;
+  }
+  double ke_smear = ke + _random_gen->Gaussian(resolution[pos]*ke)+bias[pos]*ke;
+  if(ke_smear<0) ke_smear = 0;
+  return ke_smear;
+}
+
 
 // -------------------------------------------------------
 //              Cos theta smearing function
@@ -184,6 +214,70 @@ TH2D* CorrelationHist (const TMatrixD& cov,
   return h;
 }
 
+bool isContained(double tmu, double cos){
+
+  // Values from http://pdg.lbl.gov/2012/AtomicNuclearProperties/MUON_ELOSS_TABLES/muonloss_289.pdf
+  double momentum[] = {0.047,0.056,0.068,0.085,0.100,0.153,0.176,0.222,0.287,0.392,0.495,0.900,1.101,1.502,2.103}; //GeV
+  double range[] = {0.007,0.013,0.024,0.047,0.076,0.221,0.304,0.482,0.761,1.236,1.708,3.534,4.415,6.126,8.610}; //m
+
+  // Find position of muon momentum in momentum array
+  int pos = 15;
+  for(int i=0; i<15; i++){
+    if(tmu<momentum[i]) pos = i;
+  }
+
+  //Use linear interpolation to calculate expected range in LAr
+  double rmu = 0;
+  if(pos==15) rmu = 9;
+  else if(pos==0) rmu = 0.007;
+  else{
+    rmu = range[pos-1]+(tmu-momentum[pos-1])*(range[pos]-range[pos-1])/(momentum[pos]-momentum[pos-1]);
+  }
+
+  srand (time(NULL));
+  //Generate a random z position inside detector
+  double zpos = ((double)rand()/RAND_MAX)*5.312;
+
+  //If range * cos thetamu <= z position
+  if(abs(rmu*cos)<=zpos) return 1;
+  else return 0;
+
+}
+
+bool isReconstructed(double tmu, double cos){
+
+  if(tmu<0.05) return 0;
+
+  //CCQE efficiency as function of momentum from Fig10.b of uboone DocDB 7561
+  double effmom[] = {0.79,0.95,0.975,0.98,0.98,0.99,0.99,0.995,1.0,1.0};
+  //CCQE efficiency as function of theta from Fig10.c of uboone DocDB 7561
+  double efftheta[] = {1,1,1,1,1,1,0.995,0.985,1,0.985,0.995,1,1,1,1,0.995,0.995,0.995,0.99,0.98,0.97,0.97,0.975,0.98,0.975,0.97,0.95,0.945,0.94,0.92,0.87,0.91};
+
+  //Find position of muon momentum in momentum efficiency array
+  int posmom = 9;
+  for(int i=0; i<10; i++){
+    if(tmu<0.1*(i+1)) posmom = i;
+  }
+
+  //Find position of muon angle in angle efficiency array
+  int postheta = 0;
+  for(int j=0; j<32; j++){
+    if(TMath::ACos(cos)<0.09817*(j+1)) postheta = j;
+  }
+
+  //Don't have correlations between angle and momentum efficiencies, take the smallest value to be conservative
+  double efficiency = 1;
+  if(effmom[posmom]<efftheta[postheta]) efficiency = effmom[posmom];
+  else efficiency = efftheta[postheta];
+  srand (time(NULL));
+
+  //Generate random number between 0 and 1
+  double prob = (double)rand()/RAND_MAX;
+  if(prob<=efficiency) return 1;
+  else return 0;
+
+}
+
 // -------------------------------------------------------
 //  Function to test smearing on 2D delta function
 // -------------------------------------------------------
@@ -203,8 +297,17 @@ void TestSmearing(double cos, double tmu) {
   //Populate histograms
   for (int i=0; i<10000; ++i){
     double smear_cos = SmearCosTheta(cos,_rand_gen);
+    double smear_tmu = tmu;
     h_before->Fill(cos,tmu);
-    h_after->Fill(smear_cos,SmearKE(tmu,_rand_gen));
+    if(isReconstructed(tmu,cos)){
+      if(isContained(tmu,cos)){
+        smear_tmu = RangeSmear(tmu,_rand_gen);
+      }
+      else{
+        smear_tmu = McsSmear(tmu,_rand_gen);
+      }
+      h_after->Fill(smear_cos,smear_tmu);
+    }
   }
 
   //Get X and Y projections
@@ -341,7 +444,7 @@ int smearing() {
     // h_sm      : smeared histogram
     //
 
-    TH2D *h_un = new TH2D("h_un"," T_{#mu} - cos#theta_{#mu} distribution before smearing ",20,-1,1,18,0,2);
+    TH2D *h_un = new TH2D("h_un"," T_{#mu} - cos#theta_{#mu} distribution before smearing ",20,-1,1,20,0,2);
     def_tree->Draw("( El - 0.10566 ):cthl>>h_un","fspl == 13 && cc","colz"); 
 
     // Normalization, Rate ==> Cross section
@@ -377,7 +480,7 @@ int smearing() {
     std::vector<TH2*> v_unf;
     
     // The same histogram definitions for the smeared distributions
-    TH2D *h_sm = new TH2D("h_sm"," T_{#mu} - cos#theta_{#mu} distribution after smearing, impurity ",20,-1,1,18,0,2);
+    TH2D *h_sm = new TH2D("h_sm"," T_{#mu} - cos#theta_{#mu} distribution after smearing, impurity ",20,-1,1,20,0,2);
     
     // Take h_un and smear it
     Smear(def_tree, train_tree, h_sm, v_un, v_sm, v_sm_rec, v_unf, scalar_norm);
@@ -391,10 +494,10 @@ int smearing() {
     canvas->SetLeftMargin(0.12);
     canvas->SetRightMargin(0.15);
 
-    TH2D *h_eff = new TH2D("h_eff","h_eff;cos#theta_{#mu};T_{#mu} (GeV)",20,-1,1,18,0,2);
-    TH2D *h_pur = new TH2D("h_pur","h_pur;cos#theta_{#mu};T_{#mu} (GeV)",20,-1,1,18,0,2);
-    TH2D *h_effpur = new TH2D("h_effpur","h_effpur;cos#theta_{#mu};T_{#mu} (GeV)",20,-1,1,18,0,2);
-    TH2D *h_impur = new TH2D("h_impur","h_impur;cos#theta_{#mu};T_{#mu} (GeV)",20,-1,1,18,0,2);
+    TH2D *h_eff = new TH2D("h_eff","h_eff;cos#theta_{#mu};T_{#mu} (GeV)",20,-1,1,20,0,2);
+    TH2D *h_pur = new TH2D("h_pur","h_pur;cos#theta_{#mu};T_{#mu} (GeV)",20,-1,1,20,0,2);
+    TH2D *h_effpur = new TH2D("h_effpur","h_effpur;cos#theta_{#mu};T_{#mu} (GeV)",20,-1,1,20,0,2);
+    TH2D *h_impur = new TH2D("h_impur","h_impur;cos#theta_{#mu};T_{#mu} (GeV)",20,-1,1,20,0,2);
 
     //Fill efficiency histogram with Nsig/Nmcsig
     h_eff->Add(h_sm,v_sm[5],1.,-1.);
@@ -465,15 +568,15 @@ void Smear ( TTree *tree,
 
     TRandom *_rand = new TRandom( time( NULL ) );
 
-    TH2D *hTrainTrue= new TH2D ("traintrue", "Training Truth;cos#theta_{#mu};T_{#mu} (GeV)", 20, -1, 1, 18, 0, 2);
+    TH2D *hTrainTrue= new TH2D ("traintrue", "Training Truth;cos#theta_{#mu};T_{#mu} (GeV)", 20, -1, 1, 20, 0, 2);
     hTrainTrue->SetLineColor(kRed + 2);
-    TH2D *hTrain= new TH2D ("train", "Training Measured;cos#theta_{#mu};T_{#mu} (GeV)", 20, -1, 1, 18, 0, 2);
+    TH2D *hTrain= new TH2D ("train", "Training Measured;cos#theta_{#mu};T_{#mu} (GeV)", 20, -1, 1, 20, 0, 2);
     hTrain->SetLineColor(kGreen + 2);
-    TH2D *hTrainFake= new TH2D ("trainfake", "Training Fakes;cos#theta_{#mu};T_{#mu} (GeV)", 20, -1, 1, 18, 0, 2);
+    TH2D *hTrainFake= new TH2D ("trainfake", "Training Fakes;cos#theta_{#mu};T_{#mu} (GeV)", 20, -1, 1, 20, 0, 2);
     RooUnfoldResponse response(hTrain, hTrainTrue);
-    TH2D *hTrue = new TH2D("true", "Test Truth;cos#theta_{#mu};T_{#mu} (GeV)", 20, -1, 1, 18, 0, 2);
+    TH2D *hTrue = new TH2D("true", "Test Truth;cos#theta_{#mu};T_{#mu} (GeV)", 20, -1, 1, 20, 0, 2);
     hTrue->SetLineColor(kRed + 2);
-    TH2D *hMeas = new TH2D("meas", "Test Measured;cos#theta_{#mu};T_{#mu} (GeV)", 20, -1 ,1, 18, 0, 2);
+    TH2D *hMeas = new TH2D("meas", "Test Measured;cos#theta_{#mu};T_{#mu} (GeV)", 20, -1 ,1, 20, 0, 2);
     hMeas->SetLineColor(kGreen + 2);
 /*
     //Train on a flat distribution
@@ -537,12 +640,21 @@ void Smear ( TTree *tree,
         if ( fspl == 13 && cc == 1 ) {
 
           double cthl_smeared = SmearCosTheta(cthl,_random_gen);
-          double T_mu_smeared = SmearKE(T_mu,_random_gen);
+          //double T_mu_smeared = SmearKE(T_mu,_random_gen);
 
           hTrainTrue->Fill(cthl,T_mu);
 
           //Count the CC numu event types after smearing
-          if ( T_mu > 0.05 ){
+          if ( isReconstructed(T_mu,cthl) ){
+
+            double T_mu_smeared = T_mu;
+
+            if ( isContained(T_mu,cthl) ){
+              T_mu_smeared = RangeSmear(T_mu,_random_gen);
+            }
+            else{
+              T_mu_smeared = McsSmear(T_mu,_random_gen);
+            }
  
             hTrain->Fill(cthl_smeared, T_mu_smeared);
             response.Fill(cthl_smeared, T_mu_smeared, cthl, T_mu);
@@ -596,35 +708,35 @@ void Smear ( TTree *tree,
 
     // Stacked unsmeared histogram - truth variables
     THStack *hs_un = new THStack("hs_un","Stacked Histograms;cos#theta_{#mu};T_{#mu} (GeV)");
-    TH2D *h_ccqe_un = new TH2D("h_ccqe_un","CCQE",20,-1,1,18,0,2);
-    TH2D *h_ccres_un = new TH2D("h_ccres_un","CCRES",20,-1,1,18,0,2);
-    TH2D *h_ccdis_un = new TH2D("h_ccdis_un","CCDIS",20,-1,1,18,0,2);
-    TH2D *h_cccoh_un = new TH2D("h_cccoh_un","CCCOH",20,-1,1,18,0,2);
-    TH2D *h_ccmec_un = new TH2D("h_ccmec_un","CCMEC",20,-1,1,18,0,2);
+    TH2D *h_ccqe_un = new TH2D("h_ccqe_un","CCQE",20,-1,1,20,0,2);
+    TH2D *h_ccres_un = new TH2D("h_ccres_un","CCRES",20,-1,1,20,0,2);
+    TH2D *h_ccdis_un = new TH2D("h_ccdis_un","CCDIS",20,-1,1,20,0,2);
+    TH2D *h_cccoh_un = new TH2D("h_cccoh_un","CCCOH",20,-1,1,20,0,2);
+    TH2D *h_ccmec_un = new TH2D("h_ccmec_un","CCMEC",20,-1,1,20,0,2);
 
     // Stacked smeared histogram - truth variables
     THStack *hs_sm = new THStack("hs_sm","Stacked Histograms;cos#theta_{#mu};T_{#mu} (GeV)");
-    TH2D *h_ccqe_sm = new TH2D("h_ccqe_sm","CCQE",20,-1,1,18,0,2);
-    TH2D *h_ccres_sm = new TH2D("h_ccres_sm","CCRES",20,-1,1,18,0,2);
-    TH2D *h_ccdis_sm = new TH2D("h_ccdis_sm","CCDIS",20,-1,1,18,0,2);
-    TH2D *h_cccoh_sm = new TH2D("h_cccoh_sm","CCCOH",20,-1,1,18,0,2);
-    TH2D *h_nc_sm = new TH2D("h_nc_sm","NCnpi",20,-1,1,18,0,2);
-    TH2D *h_ccmec_sm = new TH2D("h_ccmec_sm","CCMEC",20,-1,1,18,0,2);
+    TH2D *h_ccqe_sm = new TH2D("h_ccqe_sm","CCQE",20,-1,1,20,0,2);
+    TH2D *h_ccres_sm = new TH2D("h_ccres_sm","CCRES",20,-1,1,20,0,2);
+    TH2D *h_ccdis_sm = new TH2D("h_ccdis_sm","CCDIS",20,-1,1,20,0,2);
+    TH2D *h_cccoh_sm = new TH2D("h_cccoh_sm","CCCOH",20,-1,1,20,0,2);
+    TH2D *h_nc_sm = new TH2D("h_nc_sm","NCnpi",20,-1,1,20,0,2);
+    TH2D *h_ccmec_sm = new TH2D("h_ccmec_sm","CCMEC",20,-1,1,20,0,2);
 
     // Stacked smeared histogram - reco variables
     THStack *hs_sm_rec = new THStack("hs_sm_rec","Stacked Histograms;cos#theta_{#mu};T_{#mu} (GeV)");
-    TH2D *h_cc0pi0p_sm = new TH2D("h_cc0pi0p_sm","CC 0pi 0p",20,-1,1,18,0,2);
-    TH2D *h_cc0pi1p_sm = new TH2D("h_cc0pi1p_sm","CC 0pi 1p",20,-1,1,18,0,2);
-    TH2D *h_cc0pi2p_sm = new TH2D("h_cc0pi2p_sm","CC 0pi 2p",20,-1,1,18,0,2);
-    TH2D *h_cc0pi3p_sm = new TH2D("h_cc0pi3p_sm","CC 0pi 3p",20,-1,1,18,0,2);
-    TH2D *h_cc0pinp_sm = new TH2D("h_cc0pinp_sm","CC 0pi >3p",20,-1,1,18,0,2);
-    TH2D *h_cc1pip_sm = new TH2D("h_cc1pip_sm","CC 1pi+",20,-1,1,18,0,2);
-    TH2D *h_cc1pim_sm = new TH2D("h_cc1pim_sm","CC 1pi-",20,-1,1,18,0,2);
-    TH2D *h_cc1pi0_sm = new TH2D("h_cc1pi0_sm","CC 1pi0",20,-1,1,18,0,2);
-    TH2D *h_cc2pipm_sm = new TH2D("h_cc2pipm_sm","CC 2pi+/-",20,-1,1,18,0,2);
-    TH2D *h_ccother_sm = new TH2D("h_ccother_sm","CCOther",20,-1,1,18,0,2);
-    TH2D *h_nc1pi_sm = new TH2D("h_nc1pi_sm","NC 1pi",20,-1,1,18,0,2);
-    TH2D *h_ncother_sm = new TH2D("h_ncother_sm","NCOther",20,-1,1,18,0,2);
+    TH2D *h_cc0pi0p_sm = new TH2D("h_cc0pi0p_sm","CC 0pi 0p",20,-1,1,20,0,2);
+    TH2D *h_cc0pi1p_sm = new TH2D("h_cc0pi1p_sm","CC 0pi 1p",20,-1,1,20,0,2);
+    TH2D *h_cc0pi2p_sm = new TH2D("h_cc0pi2p_sm","CC 0pi 2p",20,-1,1,20,0,2);
+    TH2D *h_cc0pi3p_sm = new TH2D("h_cc0pi3p_sm","CC 0pi 3p",20,-1,1,20,0,2);
+    TH2D *h_cc0pinp_sm = new TH2D("h_cc0pinp_sm","CC 0pi >3p",20,-1,1,20,0,2);
+    TH2D *h_cc1pip_sm = new TH2D("h_cc1pip_sm","CC 1pi+",20,-1,1,20,0,2);
+    TH2D *h_cc1pim_sm = new TH2D("h_cc1pim_sm","CC 1pi-",20,-1,1,20,0,2);
+    TH2D *h_cc1pi0_sm = new TH2D("h_cc1pi0_sm","CC 1pi0",20,-1,1,20,0,2);
+    TH2D *h_cc2pipm_sm = new TH2D("h_cc2pipm_sm","CC 2pi+/-",20,-1,1,20,0,2);
+    TH2D *h_ccother_sm = new TH2D("h_ccother_sm","CCOther",20,-1,1,20,0,2);
+    TH2D *h_nc1pi_sm = new TH2D("h_nc1pi_sm","NC 1pi",20,-1,1,20,0,2);
+    TH2D *h_ncother_sm = new TH2D("h_ncother_sm","NCOther",20,-1,1,20,0,2);
 
     // Get the branches
     TBranch *b_nf    = tree->GetBranch( "nf" );
@@ -707,12 +819,22 @@ void Smear ( TTree *tree,
           ccinc_count_un++;
 
           double cthl_smeared = SmearCosTheta(cthl,_random_gen);
-          double T_mu_smeared = SmearKE(T_mu,_random_gen);
+          //double T_mu_smeared = SmearKE(T_mu,_random_gen);
 
           hTrue->Fill(cthl,T_mu);
 
           //Count the CC numu event types after smearing
-          if ( T_mu > 0.05 ){
+          if ( isReconstructed(T_mu,cthl) ){
+
+            double T_mu_smeared = T_mu;
+
+            if( isContained(T_mu,cthl) ){
+              T_mu_smeared = RangeSmear(T_mu,_random_gen);
+            }
+            else{
+              T_mu_smeared = McsSmear(T_mu,_random_gen);
+            }
+
             //Smear the muon energy and angle
             if ( qel == 1 ) { h_ccqe_sm->Fill(cthl_smeared,T_mu_smeared); ccqe_count_sm++; }
             else if ( res == 1 ) { h_ccres_sm->Fill(cthl_smeared,T_mu_smeared); ccres_count_sm++; }
@@ -1022,7 +1144,7 @@ void Smear ( TTree *tree,
     canv->Clear();
 
     // Draw histogram of difference between truth and unfolded
-    TH2D *h_diff = new TH2D("h_diff","h_diff;cos#theta_{#mu};T_{#mu} (GeV)",20,-1,1,18,0,2);
+    TH2D *h_diff = new TH2D("h_diff","h_diff;cos#theta_{#mu};T_{#mu} (GeV)",20,-1,1,20,0,2);
     h_diff->SetTitleOffset(0.75,"Y");
     /*for (int i = 0; i<hTrue->GetNbinsX(); i++){
       for (int j = 0; j<hTrue->GetNbinsY(); j++){
