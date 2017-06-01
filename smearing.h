@@ -54,8 +54,7 @@ void Smear ( TTree *tree,
              std::vector<TH2*> &v_un,
              std::vector<TH2*> &v_sm,
              std::vector<TH2*> &v_sm_rec,
-             std::vector<TH2*> &v_unf,
-             double scalar_norm); 
+             std::vector<TH2*> &v_unf); 
 
 
 // -------------------------------------------------------------------------

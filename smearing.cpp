@@ -41,13 +41,14 @@ double McsSmear(double ke, ROOT::Math::GSLRngMT *_random_gen){
 
   //For exiting muons use multiple coulomb scattering bias and resolution
   //Values from Fig 5 of https://arxiv.org/pdf/1703.06187.pdf
-  double bias[] = {0.0273,0.0409,0.0352,0.0250,0.0227,0.0068,0.0364,0.0273,0.0227};
-  double resolution[] = {0.127,0.145,0.143,0.141,0.164,0.177,0.250,0.266,0.341};
+  double bias[] = {0.0273,0.0409,0.0352,0.0250,0.0227,0.0068,0.0364,0.0273,0.0227};//0.0409
+  double resolution[] = {0.127,0.145,0.143,0.141,0.164,0.177,0.250,0.266,0.341};//0.145
   int pos = 8;
   for(int i=0; i<9; i++){
-    if(ke<(0.33+0.186*(i+1))) pos = i;
+    if(ke<(0.34+0.41*(i+1))) {pos = i; break;}
   }
-  double ke_smear = ke + _random_gen->Gaussian(resolution[pos]*ke)+bias[pos]*ke;
+  double var = _random_gen->Gaussian(resolution[pos]*ke);
+  double ke_smear = ke + var + bias[pos]*ke;
   if(ke_smear<0) ke_smear = 0;
   return ke_smear;
 }
@@ -60,7 +61,7 @@ double RangeSmear(double ke, ROOT::Math::GSLRngMT *_random_gen){
   double resolution[] = {0.017,0.021,0.023,0.026,0.025,0.030,0.030,0.040,0.032};
   int pos = 8;
   for(int i=0; i<9; i++){
-    if(ke<(0.34+0.41*(i+1))) pos = i;
+    if(ke<(0.33+0.186*(i+1))) {pos = i; break;}
   }
   double ke_smear = ke + _random_gen->Gaussian(resolution[pos]*ke)+bias[pos]*ke;
   if(ke_smear<0) ke_smear = 0;
@@ -87,8 +88,8 @@ double SmearCosTheta(double costheta, ROOT::Math::GSLRngMT *_random_gen){
 // -------------------------------------------------------
 //  Function to get Y projection of stacked histograms
 // -------------------------------------------------------
-void StackProjectionY(std::vector<TH2*> histograms, string legendlabels[], string filename, int bin, TCanvas *canvas, TH2* h_unf, bool isTruth){
-  
+void StackProjectionY(std::vector<TH2*> histograms, string legendlabels[], string filename, int bin, TCanvas *canvas, TH2* h_unf, bool isTruth, double scalar_norm){
+ 
   canvas->Clear();
 
   // Make the title for the current histogram and the file name
@@ -107,6 +108,7 @@ void StackProjectionY(std::vector<TH2*> histograms, string legendlabels[], strin
   for ( size_t i = 0; i < histograms.size(); i++){
     //Fill THStack with projection Y of ith histogram for the jth bin
     TH1D *temphist = histograms[i]->ProjectionY(std::to_string(i).c_str(),bin,bin);
+    if(isTruth) temphist->Scale(scalar_norm);
     temphist->SetLineWidth(1);
     temphist->SetLineColor(temphist->GetFillColor());
     temphist->SetFillStyle(1001);
@@ -122,6 +124,7 @@ void StackProjectionY(std::vector<TH2*> histograms, string legendlabels[], strin
   // If the histograms are of unsmeared truth variables plot the unfolding results on top of them
   if (isTruth){
     TH1D* hUnf = h_unf->ProjectionY("unf",bin,bin);
+    hUnf->Scale(scalar_norm);
     hUnf->SetLineWidth(1);
     hUnf->SetLineColor(kBlack);
     hUnf->SetMarkerStyle(20);
@@ -129,7 +132,8 @@ void StackProjectionY(std::vector<TH2*> histograms, string legendlabels[], strin
     hUnf->Draw("E1 SAME");
   }
   hs_Tmu_un_tmp->GetXaxis()->SetTitle("T_{#mu} (GeV)");
-  hs_Tmu_un_tmp->GetYaxis()->SetTitle("Number of SBND Events");
+  if(isTruth)hs_Tmu_un_tmp->GetYaxis()->SetTitle("d^{2}#sigma/dcos#theta_{#mu}dT_{#mu} (10^{-38}cm^{2}/GeV/n)");
+  else hs_Tmu_un_tmp->GetYaxis()->SetTitle("Number of SBND Events");
   canvas->Modified();
   leg_Tmu_un->Draw();
   canvas->SaveAs(title.c_str());
@@ -143,7 +147,7 @@ void StackProjectionY(std::vector<TH2*> histograms, string legendlabels[], strin
 // -------------------------------------------------------
 //  Function to get X projection of stacked histograms
 // -------------------------------------------------------
-void StackProjectionX(std::vector<TH2*> histograms, string legendlabels[], string filename, int bin, TCanvas *canvas, TH2* h_unf, bool isTruth){
+void StackProjectionX(std::vector<TH2*> histograms, string legendlabels[], string filename, int bin, TCanvas *canvas, TH2* h_unf, bool isTruth, double scalar_norm){
 
   canvas->Clear();
   
@@ -163,6 +167,7 @@ void StackProjectionX(std::vector<TH2*> histograms, string legendlabels[], strin
   for ( size_t i = 0; i < histograms.size(); i++){
     //Fill THStack with projection X of ith histogram for the jth bin
     TH1D *temphist = histograms[i]->ProjectionX(std::to_string(i).c_str(),bin,bin);
+    if(isTruth) temphist->Scale(scalar_norm);
     temphist->SetLineWidth(1);
     temphist->SetLineColor(temphist->GetFillColor());
     temphist->SetFillStyle(1001);
@@ -178,6 +183,7 @@ void StackProjectionX(std::vector<TH2*> histograms, string legendlabels[], strin
   // If the histograms are of unsmeared truth variables plot the unfolding results on top of them
   if (isTruth){
     TH1D* hUnf = h_unf->ProjectionX("unf",bin,bin);
+    hUnf->Scale(scalar_norm);
     hUnf->SetLineWidth(1);
     hUnf->SetLineColor(kBlack);
     hUnf->SetMarkerStyle(20);
@@ -185,7 +191,8 @@ void StackProjectionX(std::vector<TH2*> histograms, string legendlabels[], strin
     hUnf->Draw("E1 SAME");
   }
   hs_cosmu_un_tmp->GetXaxis()->SetTitle("cos#theta_{#mu}");
-  hs_cosmu_un_tmp->GetYaxis()->SetTitle("Number of SBND Events");
+  if(isTruth)hs_cosmu_un_tmp->GetYaxis()->SetTitle("d^{2}#sigma/dcos#theta_{#mu}dT_{#mu} (10^{-38}cm^{2}/GeV/n)");
+  else hs_cosmu_un_tmp->GetYaxis()->SetTitle("Number of SBND Events");
   canvas->Modified();
   leg_cosmu_un->Draw();
   canvas->SaveAs(title.c_str());
@@ -214,7 +221,7 @@ TH2D* CorrelationHist (const TMatrixD& cov,
   return h;
 }
 
-bool isContained(double tmu, double cos){
+bool isContained(double tmu, double cos, TRandom *_rand){
 
   // Values from http://pdg.lbl.gov/2012/AtomicNuclearProperties/MUON_ELOSS_TABLES/muonloss_289.pdf
   double momentum[] = {0.047,0.056,0.068,0.085,0.100,0.153,0.176,0.222,0.287,0.392,0.495,0.900,1.101,1.502,2.103}; //GeV
@@ -223,7 +230,7 @@ bool isContained(double tmu, double cos){
   // Find position of muon momentum in momentum array
   int pos = 15;
   for(int i=0; i<15; i++){
-    if(tmu<momentum[i]) pos = i;
+    if(tmu<momentum[i]) {pos = i; break;}
   }
 
   //Use linear interpolation to calculate expected range in LAr
@@ -234,17 +241,25 @@ bool isContained(double tmu, double cos){
     rmu = range[pos-1]+(tmu-momentum[pos-1])*(range[pos]-range[pos-1])/(momentum[pos]-momentum[pos-1]);
   }
 
-  srand (time(NULL));
-  //Generate a random z position inside detector
-  double zpos = ((double)rand()/RAND_MAX)*5.312;
+  //Generate a random position inside detector
+  double zstart = _rand->Uniform(0,5.312);
+  double ystart = _rand->Uniform(0,4.294);
+  double xstart = _rand->Uniform(0,4.312);
+  double phi = _rand->Uniform(0,6.283);
+  double theta = TMath::ACos(cos);
+
+  //Calculate end position
+  double zend = zstart + rmu*cos;
+  double yend = ystart + rmu*TMath::Sin(theta)*TMath::Sin(phi);
+  double xend = xstart + rmu*TMath::Sin(theta)*TMath::Cos(phi);
 
   //If range * cos thetamu <= z position
-  if(abs(rmu*cos)<=zpos) return 1;
+  if(xend>=0 && xend<=4.312 && yend>=0 && yend<=4.294 && zend>=0 && zend<=5.312) return 1;
   else return 0;
 
 }
 
-bool isReconstructed(double tmu, double cos){
+bool isReconstructed(double tmu, double cos, TRandom *_rand){
 
   if(tmu<0.05) return 0;
 
@@ -256,23 +271,23 @@ bool isReconstructed(double tmu, double cos){
   //Find position of muon momentum in momentum efficiency array
   int posmom = 9;
   for(int i=0; i<10; i++){
-    if(tmu<0.1*(i+1)) posmom = i;
+    if(tmu<0.1*(i+1)) {posmom = i; break;}
   }
 
   //Find position of muon angle in angle efficiency array
   int postheta = 0;
   for(int j=0; j<32; j++){
-    if(TMath::ACos(cos)<0.09817*(j+1)) postheta = j;
+    if(TMath::ACos(cos)<0.09817*(j+1)) {postheta = j; break;}
   }
 
   //Don't have correlations between angle and momentum efficiencies, take the smallest value to be conservative
   double efficiency = 1;
   if(effmom[posmom]<efftheta[postheta]) efficiency = effmom[posmom];
   else efficiency = efftheta[postheta];
-  srand (time(NULL));
 
   //Generate random number between 0 and 1
-  double prob = (double)rand()/RAND_MAX;
+  double prob = _rand->Uniform(0,1);
+  
   if(prob<=efficiency) return 1;
   else return 0;
 
@@ -281,39 +296,43 @@ bool isReconstructed(double tmu, double cos){
 // -------------------------------------------------------
 //  Function to test smearing on 2D delta function
 // -------------------------------------------------------
-void TestSmearing(double cos, double tmu) {
+void TestSmearing() {
 
   //Create canvases and histograms
   TCanvas *ctest = new TCanvas("ctest","",800,600);
   TLegend *ltest = new TLegend( 0.152, 0.704, 0.469, 0.88 );
-  TH2D* h_before = new TH2D("h_before","before;cos#theta_{#mu};T_{#mu} (GeV)",200,-1,1,180,0,2);
-  TH2D* h_after = new TH2D("h_after","after;cos#theta_{#mu};T_{#mu} (GeV)",200,-1,1,180,0,2);
+  TH2D* h_before = new TH2D("h_before","before;cos#theta_{#mu};T_{#mu} (GeV)",50,-1,1,50,0,2);
+  TH2D* h_after = new TH2D("h_after","after;cos#theta_{#mu};T_{#mu} (GeV)",50,-1,1,50,0,2);
 
   //Initialise random number generator
   ROOT::Math::GSLRngMT *_rand_gen = new ROOT::Math::GSLRngMT;
   _rand_gen->Initialize();    
   _rand_gen->SetSeed( time( NULL ) );
 
+  TRandom *_rand = new TRandom( time( NULL ) );
+  
   //Populate histograms
   for (int i=0; i<10000; ++i){
-    double smear_cos = SmearCosTheta(cos,_rand_gen);
-    double smear_tmu = tmu;
-    h_before->Fill(cos,tmu);
-    if(isReconstructed(tmu,cos)){
-      if(isContained(tmu,cos)){
-        smear_tmu = RangeSmear(tmu,_rand_gen);
+    for (int j=0; j<4; ++j){
+      double smear_cos = SmearCosTheta(-0.75+j*0.5,_rand_gen);
+      double smear_tmu = 0.25+j*0.5;
+      h_before->Fill(-0.75+j*0.5,0.25+j*0.5);
+      if(isReconstructed(0.25+j*0.5,-0.75+j*0.5,_rand)){
+        if(isContained(0.25+j*0.5,-0.75+j*0.5,_rand)){
+          smear_tmu = RangeSmear(0.25+j*0.5,_rand_gen);
+        }
+        else{
+          smear_tmu = McsSmear(0.25+j*0.5,_rand_gen);
+        }
+        h_after->Fill(smear_cos,smear_tmu);
       }
-      else{
-        smear_tmu = McsSmear(tmu,_rand_gen);
-      }
-      h_after->Fill(smear_cos,smear_tmu);
     }
   }
 
   //Get X and Y projections
-  TH1D* h_beforeX = h_before->ProjectionX("px6",1,180);
+  TH1D* h_beforeX = h_before->ProjectionX("px6",1,200);
   TH1D* h_beforeY = h_before->ProjectionY("py6",1,200);
-  TH1D* h_afterX = h_after->ProjectionX("px7",1,180);
+  TH1D* h_afterX = h_after->ProjectionX("px7",1,200);
   TH1D* h_afterY = h_after->ProjectionY("py7",1,200);
 
   ctest->SetLeftMargin(0.12);
@@ -372,10 +391,55 @@ TH1D* ReBin(TH2D* twoDhist){
   TH1D* newhist = new TH1D("newhist","",newbins,0,newbins-1);
   for(int i=0;i<xbins;++i){
     for(int j=0;j<ybins;++j){
-      newhist->SetBinContent(18*i+j,twoDhist->GetBinContent(i,j));
+      newhist->SetBinContent(20*i+j,twoDhist->GetBinContent(i,j));
     }
   }
   return newhist;
+
+}
+
+void toCrossSec(std::vector<TH2*> v_rate, std::vector<TH2*> &v_xsec){
+
+  //Open flux file
+  TFile f3("~/Documents/PhD/CrossSections/flux/sbn_FHC_flux_hist.root");
+  if (f3.IsZombie()) {
+    cout << "Error opening flux file" << endl;
+    exit(-1);
+  }
+  else{
+    cout << " Flux file is open " <<endl;
+  }
+  TH1D *h_flux = (TH1D*)f3.Get("h_numu_110m");
+
+  // Normalization, Rate ==> Cross section
+  double cos_bins = v_rate[0]->GetXaxis()->GetBinWidth(1);
+  double Tmu_bins = v_rate[0]->GetYaxis()->GetBinWidth(1);
+  double flux_int = h_flux->Integral();
+  double Na = 6.63e34;
+  double M_fid = 1.016e8; //grams
+  double A_ar = 39.948;
+  double tot_tgt = (Na*M_fid)/A_ar;
+  double barns = 1e38;
+  double scalar_norm = barns/(cos_bins*Tmu_bins*flux_int*tot_tgt);
+
+  for(size_t k = 0; k<v_rate.size(); k++){
+    // Can't do this here because the histograms get deleted when they go out of scope, even once pushed to the vector
+    // even though this seems to work fine in Smear(), very strange
+    //v_xsec.push_back( new TH2D((string("h_xsec")+to_string(k)).c_str(),"h_xsec;cos#theta_{#mu};T_{#mu} (GeV)",20,-1,1,20,0,2) );
+
+    int xbins = v_rate[k]->GetNbinsX();
+    int ybins = v_rate[k]->GetNbinsY();
+    for(int i=1;i<=xbins;++i){
+      for(int j=1;j<=ybins;++j){
+        v_xsec[k]->SetBinContent(i,j,v_rate[k]->GetBinContent(i,j)/scalar_norm);
+        double erate = v_rate[k]->GetBinError(i,j);
+        double exsec = v_xsec[k]->GetBinContent(i,j)*erate/v_rate[k]->GetBinContent(i,j);
+        v_xsec[k]->SetBinError(i,j,exsec);
+        if(i==0&&j==0) cout<<v_xsec[k]->GetBinContent(i,j)<<endl;
+      }
+    }
+    //v_xsec.push_back(h_xsec);
+  }
 
 }
 
@@ -405,16 +469,7 @@ int smearing() {
     else{
         cout << " Training event file is open " << endl;
     }
-    //Open flux file
-    TFile f3("~/Documents/PhD/CrossSections/flux/sbn_FHC_flux_hist.root");
-    if (f3.IsZombie()) {
-      cout << "Error opening flux file" << endl;
-      exit(-1);
-    }
-    else{
-      cout << " Flux file is open " <<endl;
-    }
-    TH1D *h_flux = (TH1D*)f3.Get("h_numu_110m");
+
     //-----------------------------------------------------------------------
     //                            Parameters to consider
     // -------------------------------------------------------------------------
@@ -447,17 +502,6 @@ int smearing() {
     TH2D *h_un = new TH2D("h_un"," T_{#mu} - cos#theta_{#mu} distribution before smearing ",20,-1,1,20,0,2);
     def_tree->Draw("( El - 0.10566 ):cthl>>h_un","fspl == 13 && cc","colz"); 
 
-    // Normalization, Rate ==> Cross section
-    double cos_bins = h_un->GetXaxis()->GetBinWidth(1);
-    double Tmu_bins = h_un->GetYaxis()->GetBinWidth(1);
-    double flux_int = h_flux->Integral();
-    double Na = 6.63e34;
-    double M_fid = 1.016e8; //grams
-    double A_ar = 39.948;
-    double tot_tgt = (Na*M_fid)/A_ar;
-    double barns = 1e38;
-    double scalar_norm = barns/(cos_bins*Tmu_bins*flux_int*tot_tgt);
-
     TCanvas *can = new TCanvas("can","",800,600);
     can->SetLeftMargin(0.12);
     can->SetRightMargin(0.15);
@@ -483,7 +527,7 @@ int smearing() {
     TH2D *h_sm = new TH2D("h_sm"," T_{#mu} - cos#theta_{#mu} distribution after smearing, impurity ",20,-1,1,20,0,2);
     
     // Take h_un and smear it
-    Smear(def_tree, train_tree, h_sm, v_un, v_sm, v_sm_rec, v_unf, scalar_norm);
+    Smear(def_tree, train_tree, h_sm, v_un, v_sm, v_sm_rec, v_unf);
 
     // The the 2 2D histograms and draw slices in Tmu and cos theta mu
     Slices( h_un, h_sm, v_unf );
@@ -536,7 +580,7 @@ int smearing() {
     canvas->SaveAs("~/Documents/PhD/CrossSections/output/effpur/impur.root");
     delete canvas;
 
-    TestSmearing(0.5,0.5);
+    TestSmearing();
 
     return 0;
 }
@@ -554,8 +598,7 @@ void Smear ( TTree *tree,
              std::vector<TH2*> &v_un,
              std::vector<TH2*> &v_sm,
              std::vector<TH2*> &v_sm_rec,
-             std::vector<TH2*> &v_unf,
-             double scalar_norm){
+             std::vector<TH2*> &v_unf){
 
     TCanvas *canv = new TCanvas("canv","",800,600);
     canv->SetLeftMargin(0.12);
@@ -645,11 +688,11 @@ void Smear ( TTree *tree,
           hTrainTrue->Fill(cthl,T_mu);
 
           //Count the CC numu event types after smearing
-          if ( isReconstructed(T_mu,cthl) ){
+          if ( isReconstructed(T_mu,cthl,_rand) ){
 
             double T_mu_smeared = T_mu;
 
-            if ( isContained(T_mu,cthl) ){
+            if ( isContained(T_mu,cthl,_rand) ){
               T_mu_smeared = RangeSmear(T_mu,_random_gen);
             }
             else{
@@ -824,11 +867,11 @@ void Smear ( TTree *tree,
           hTrue->Fill(cthl,T_mu);
 
           //Count the CC numu event types after smearing
-          if ( isReconstructed(T_mu,cthl) ){
+          if ( isReconstructed(T_mu,cthl,_rand) ){
 
             double T_mu_smeared = T_mu;
 
-            if( isContained(T_mu,cthl) ){
+            if( isContained(T_mu,cthl,_rand) ){
               T_mu_smeared = RangeSmear(T_mu,_random_gen);
             }
             else{
@@ -1038,16 +1081,16 @@ void Smear ( TTree *tree,
     TH1D* hTrainX; TH1D* hTrainY;
     TH1D* hTrainTrueX; TH1D* hTrainTrueY;
     TH1D* hTrainFakeX; TH1D* hTrainFakeY;
-    hTrainX = hTrain->ProjectionX("px3",1,18); hTrainY = hTrain->ProjectionY("py3",1,20);
-    hTrainTrueX = hTrainTrue->ProjectionX("px4",1,18); hTrainTrueY = hTrainTrue->ProjectionY("py4",1,20);
-    hTrainFakeX = hTrainFake->ProjectionX("px5",1,18); hTrainFakeY = hTrainFake->ProjectionY("py5",1,20);
+    hTrainX = hTrain->ProjectionX("px3",1,20); hTrainY = hTrain->ProjectionY("py3",1,20);
+    hTrainTrueX = hTrainTrue->ProjectionX("px4",1,20); hTrainTrueY = hTrainTrue->ProjectionY("py4",1,20);
+    hTrainFakeX = hTrainFake->ProjectionX("px5",1,20); hTrainFakeY = hTrainFake->ProjectionY("py5",1,20);
     TH1D* hRecoX; TH1D* hRecoY;
     hRecoX= hReco->ProjectionX(); hRecoY= hReco->ProjectionY();
     hRecoX->SetMarkerStyle(kFullDotLarge); hRecoY->SetMarkerStyle(kFullDotLarge);
     TH1D* hTrueX; TH1D* hTrueY;
     TH1D* hMeasX; TH1D* hMeasY;
-    hTrueX = hTrue->ProjectionX("px1",1,18); hTrueY = hTrue->ProjectionY("py1",1,20);
-    hMeasX = hMeas->ProjectionX("px2",1,18); hMeasY = hMeas->ProjectionY("py2",1,20);
+    hTrueX = hTrue->ProjectionX("px1",1,20); hTrueY = hTrue->ProjectionY("py1",1,20);
+    hMeasX = hMeas->ProjectionX("px2",1,20); hMeasY = hMeas->ProjectionY("py2",1,20);
 
     TLegend *leg = new TLegend( 0.172, 0.704, 0.489, 0.88 );
 
@@ -1367,21 +1410,47 @@ void SliceStack ( std::vector<TH2*> v_un, std::vector<TH2*> v_sm, std::vector<TH
     string smeared_labs[6] = {"NC n#pi","CCQE","CCMEC","CCRES","CCDIS","CCCOH"};
     string reco_labs[12] = {"NC 1#pi","NC Other","CC1#pi^{-}","CC1#pi^{+}","CC1#pi^{0}","CC2#pi^{#pm}","CC Other","#nu_{#mu} CC0#pi, 0p","#nu_{#mu} CC0#pi, 1p","#nu_{#mu} CC0#pi, 2p","#nu_{#mu} CC0#pi, 3p","#nu_{#mu} CC0#pi, >3p"};
 
-    for ( int j = 1; j < x_bins+1; j++ ){
+    //Open flux file
+    TFile f3("~/Documents/PhD/CrossSections/flux/sbn_FHC_flux_hist.root");
+    if (f3.IsZombie()) {
+      cout << "Error opening flux file" << endl;
+      exit(-1);
+    }
+    else{
+      cout << " Flux file is open " <<endl;
+    }
+    TH1D *h_flux = (TH1D*)f3.Get("h_numu_110m");
 
-      StackProjectionY(v_un, unsmeared_labs, "un_Tmu_cosmuRange:", j, canvas1, v_unf[0], 1);
-      StackProjectionY(v_sm, smeared_labs, "sm_Tmu_cosmuRange:", j, canvas1, v_unf[0], 0);
-      StackProjectionY(v_sm_rec, reco_labs, "rec_sm_Tmu_cosmuRange:", j, canvas1, v_unf[0], 0);
+    // Normalization, Rate ==> Cross section
+    double cos_bins = v_un[0]->GetXaxis()->GetBinWidth(1);
+    double Tmu_bins = v_un[0]->GetYaxis()->GetBinWidth(1);
+    double flux_int = h_flux->Integral();
+    double Na = 6.63e34;
+    double M_fid = 1.016e8; //grams
+    double A_ar = 39.948;
+    double tot_tgt = (Na*M_fid)/A_ar;
+    double barns = 1e38;
+    double scalar_norm = barns/(cos_bins*Tmu_bins*flux_int*tot_tgt);
+
+    for ( int j = 1; j < x_bins+1; j++ ){
+      StackProjectionY(v_un, unsmeared_labs, "un_Tmu_cosmuRange:", j, canvas1, v_unf[0], 1, scalar_norm);
+      StackProjectionY(v_sm, smeared_labs, "sm_Tmu_cosmuRange:", j, canvas1, v_unf[0], 0, scalar_norm);
+      StackProjectionY(v_sm_rec, reco_labs, "rec_sm_Tmu_cosmuRange:", j, canvas1, v_unf[0], 0, scalar_norm);
 
     }
 
     for ( int j = 1; j < y_bins+1; j++ ){
 
-      StackProjectionX(v_un, unsmeared_labs, "un_cosmu_TmuRange:", j, canvas1, v_unf[0], 1);
-      StackProjectionX(v_sm, smeared_labs, "sm_cosmu_TmuRange:", j, canvas1, v_unf[0], 0);
-      StackProjectionX(v_sm_rec, reco_labs, "rec_sm_cosmu_TmuRange:", j, canvas1, v_unf[0], 0);
+      StackProjectionX(v_un, unsmeared_labs, "un_cosmu_TmuRange:", j, canvas1, v_unf[0], 1, scalar_norm);
+      StackProjectionX(v_sm, smeared_labs, "sm_cosmu_TmuRange:", j, canvas1, v_unf[0], 0, scalar_norm);
+      StackProjectionX(v_sm_rec, reco_labs, "rec_sm_cosmu_TmuRange:", j, canvas1, v_unf[0], 0, scalar_norm);
 
     }
+
+    canvas1->Clear();
+    v_unf[0]->Scale(scalar_norm);
+    v_unf[0]->Draw("LEGO E1");
+    canvas1->SaveAs("~/Documents/PhD/CrossSections/output/totddxsec.root");
 
     delete canvas1;
     
