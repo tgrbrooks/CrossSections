@@ -49,11 +49,11 @@ double McsSmear(double ke, ROOT::Math::GSLRngMT *_random_gen){
   }
   double var = _random_gen->Gaussian(resolution[pos]*ke);
   double ke_smear = ke + var + bias[pos]*ke;
-  if(ke_smear<0) ke_smear = 0;
+  if(ke_smear<0) {ke_smear = 0;}
   return ke_smear;
 }
 
-double RangeSmear(double ke, ROOT::Math::GSLRngMT *_random_gen){
+double RangeSmear(double en, ROOT::Math::GSLRngMT *_random_gen){
 
   //For contained muons use range based bias and resolution
   //Values from Fig 12 of https://arxiv.org/pdf/1703.06187.pdf
@@ -61,11 +61,11 @@ double RangeSmear(double ke, ROOT::Math::GSLRngMT *_random_gen){
   double resolution[] = {0.017,0.021,0.023,0.026,0.025,0.030,0.030,0.040,0.032};
   int pos = 8;
   for(int i=0; i<9; i++){
-    if(ke<(0.33+0.186*(i+1))) {pos = i; break;}
+    if(en<(0.33+0.186*(i+1))) {pos = i; break;}
   }
-  double ke_smear = ke + _random_gen->Gaussian(resolution[pos]*ke)+bias[pos]*ke;
-  if(ke_smear<0) ke_smear = 0;
-  return ke_smear;
+  double en_smear = en + _random_gen->Gaussian(resolution[pos]*en)+bias[pos]*en;
+  if(en_smear<0){en_smear = 0;}
+  return en_smear;
 }
 
 
@@ -130,6 +130,7 @@ void StackProjectionY(std::vector<TH2*> histograms, string legendlabels[], strin
     hUnf->SetMarkerStyle(20);
     hUnf->SetMarkerSize(0.6);
     hUnf->Draw("E1 SAME");
+    leg_Tmu_un->AddEntry(hUnf,"Unfolded","pl");
   }
   hs_Tmu_un_tmp->GetXaxis()->SetTitle("T_{#mu} (GeV)");
   if(isTruth)hs_Tmu_un_tmp->GetYaxis()->SetTitle("d^{2}#sigma/dcos#theta_{#mu}dT_{#mu} (10^{-38}cm^{2}/GeV/n)");
@@ -189,6 +190,7 @@ void StackProjectionX(std::vector<TH2*> histograms, string legendlabels[], strin
     hUnf->SetMarkerStyle(20);
     hUnf->SetMarkerSize(0.6);
     hUnf->Draw("E1 SAME");
+    leg_cosmu_un->AddEntry(hUnf,"Unfolded","pl");
   }
   hs_cosmu_un_tmp->GetXaxis()->SetTitle("cos#theta_{#mu}");
   if(isTruth)hs_cosmu_un_tmp->GetYaxis()->SetTitle("d^{2}#sigma/dcos#theta_{#mu}dT_{#mu} (10^{-38}cm^{2}/GeV/n)");
@@ -383,16 +385,31 @@ void TestSmearing() {
 
 }
 
-TH1D* ReBin(TH2D* twoDhist){
+TH1D* ReBin(const char *name, TH2D* twoDhist){
 
   int xbins = twoDhist->GetNbinsX();
   int ybins = twoDhist->GetNbinsY();
   int newbins = xbins*ybins;
-  TH1D* newhist = new TH1D("newhist","",newbins,0,newbins-1);
-  for(int i=0;i<xbins;++i){
-    for(int j=0;j<ybins;++j){
-      newhist->SetBinContent(20*i+j,twoDhist->GetBinContent(i,j));
+  TH1D* newhist = new TH1D(name,"",newbins,0,newbins);
+  for(int i=1;i<=xbins;++i){
+    for(int j=1;j<=ybins;++j){
+      newhist->SetBinContent(20*(i-1)+j,twoDhist->GetBinContent(i,j));
+      newhist->SetBinError(20*(i-1)+j,twoDhist->GetBinError(i,j));
     }
+  }
+  return newhist;
+
+}
+
+// Function to transform 1D hist back into a 2D hist
+TH2D* UnReBin(const char *name, TH1D* oneDhist){
+
+  TH2D* newhist = new TH2D(name,"",20,-1,1,20,0,2);
+  for(int i=1; i<=20; ++i){
+    for(int j=1; j<=20; ++j){
+      newhist->SetBinContent(i,j,oneDhist->GetBinContent(20*(i-1)+j));
+      newhist->SetBinError(i,j,oneDhist->GetBinError(20*(i-1)+j));
+    }    
   }
   return newhist;
 
@@ -415,12 +432,15 @@ void toCrossSec(std::vector<TH2*> v_rate, std::vector<TH2*> &v_xsec){
   double cos_bins = v_rate[0]->GetXaxis()->GetBinWidth(1);
   double Tmu_bins = v_rate[0]->GetYaxis()->GetBinWidth(1);
   double flux_int = h_flux->Integral();
-  double Na = 6.63e34;
-  double M_fid = 1.016e8; //grams
-  double A_ar = 39.948;
+  double Na = 6.022e23;
+  double M_fid = 112000; //grams
+  double A_ar = 0.039948; //kg/mol
   double tot_tgt = (Na*M_fid)/A_ar;
+  double POT = 6.6e20;
+  double scaling = 5e8;
   double barns = 1e38;
-  double scalar_norm = barns/(cos_bins*Tmu_bins*flux_int*tot_tgt);
+  double cm_conv = 1e-38;
+  double scalar_norm = scaling/(cm_conv*cos_bins*Tmu_bins*flux_int*tot_tgt*POT);
 
   for(size_t k = 0; k<v_rate.size(); k++){
     // Can't do this here because the histograms get deleted when they go out of scope, even once pushed to the vector
@@ -510,11 +530,6 @@ int smearing() {
     h_un->GetYaxis()->SetTitle("T_{#mu} (GeV)");
     h_un->Draw("COLZ");
     can->SaveAs("~/Documents/PhD/CrossSections/output/total/unsmeared.root");
-
-    can->Clear();
-    TH1D* h_un_rb = ReBin(h_un);
-    h_un_rb->Draw();
-    can->SaveAs("~/Documents/PhD/CrossSections/output/rbtest.root");
 
     delete can;
 
@@ -693,7 +708,7 @@ void Smear ( TTree *tree,
             double T_mu_smeared = T_mu;
 
             if ( isContained(T_mu,cthl,_rand) ){
-              T_mu_smeared = RangeSmear(T_mu,_random_gen);
+              T_mu_smeared = RangeSmear(El,_random_gen) - m_mu;
             }
             else{
               T_mu_smeared = McsSmear(T_mu,_random_gen);
@@ -872,7 +887,7 @@ void Smear ( TTree *tree,
             double T_mu_smeared = T_mu;
 
             if( isContained(T_mu,cthl,_rand) ){
-              T_mu_smeared = RangeSmear(T_mu,_random_gen);
+              T_mu_smeared = RangeSmear(El,_random_gen) - m_mu;
             }
             else{
               T_mu_smeared = McsSmear(T_mu,_random_gen);
@@ -1074,8 +1089,33 @@ void Smear ( TTree *tree,
 
     // Do the unfolding
     RooUnfoldBayes unfold(&response, hMeas, 10);
-    TH2D* hReco = (TH2D*)unfold.Hreco((RooUnfold::ErrorTreatment)2);
+    TH2D* hReco_stat = (TH2D*)unfold.Hreco((RooUnfold::ErrorTreatment)2);
     //unfold.PrintTable(cout,hTrue);
+
+    //Add flux systematic errors
+    double err_flux = 0.05; //5%
+    TH1D* hReco_rb = ReBin("hReco_rb",hReco_stat);
+    int n_lin_bins = hReco_rb->GetNbinsX();    
+    std::vector< std::vector< double > > flux_cov;
+    std::vector< double > diagonals(n_lin_bins);
+    TMatrixDSym covariance(n_lin_bins);
+
+    // Fill covariance matrix
+    for ( int i = 0; i < n_lin_bins; ++i ){
+        for ( int j = 0; j < n_lin_bins; ++j ){
+            covariance[i][j] = hReco_rb->GetBinContent(i+1) * hReco_rb->GetBinContent(j+1) * err_flux * err_flux;
+        }
+    }
+
+    // Set the error on the 1D bins using the diagonal elements of the covariance matrix
+    for ( int i = 1; i <= n_lin_bins; ++i ){
+        double hReco_e = hReco_rb->GetBinError(i);
+        double newerr = TMath::Sqrt(hReco_e*hReco_e + covariance[i-1][i-1]);
+        hReco_rb->SetBinError(i, newerr);
+    }
+    // Recombine 
+    TH2D* hReco = UnReBin("hReco",hReco_rb);
+    
 
     // Seperate the 2D histograms into their X (cos) and Y (Tmu) components
     TH1D* hTrainX; TH1D* hTrainY;
@@ -1425,12 +1465,16 @@ void SliceStack ( std::vector<TH2*> v_un, std::vector<TH2*> v_sm, std::vector<TH
     double cos_bins = v_un[0]->GetXaxis()->GetBinWidth(1);
     double Tmu_bins = v_un[0]->GetYaxis()->GetBinWidth(1);
     double flux_int = h_flux->Integral();
-    double Na = 6.63e34;
-    double M_fid = 1.016e8; //grams
-    double A_ar = 39.948;
+    double Na = 6.022e23;
+    double M_fid = 112000; //grams
+    double A_ar = 0.039948; //kg/mol
     double tot_tgt = (Na*M_fid)/A_ar;
+    double POT = 6.6e20;
+    double scaling = 5e8;
     double barns = 1e38;
-    double scalar_norm = barns/(cos_bins*Tmu_bins*flux_int*tot_tgt);
+    double cm_conv = 1e-38;
+    double scale = 7.56016;
+    double scalar_norm = scale*scaling/(cm_conv*cos_bins*Tmu_bins*flux_int*tot_tgt*POT);
 
     for ( int j = 1; j < x_bins+1; j++ ){
       StackProjectionY(v_un, unsmeared_labs, "un_Tmu_cosmuRange:", j, canvas1, v_unf[0], 1, scalar_norm);
